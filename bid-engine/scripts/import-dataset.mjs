@@ -13,10 +13,10 @@ import { loadHackathonDataset, datasetSummary } from "../lib/datasetLoader.js";
 });
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !serviceKey) {
-  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.");
+  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env/.env.local.");
   process.exit(1);
 }
 
@@ -27,6 +27,26 @@ if (/supabase\.com\/dashboard|supabase\.com\/project/i.test(supabaseUrl)) {
 
 const supabase = createClient(supabaseUrl, serviceKey);
 const dataset = loadHackathonDataset();
+
+const preflightSupabaseConnection = async () => {
+  try {
+    const response = await fetch(`${supabaseUrl.replace(/\/+$/, "")}/rest/v1/`, {
+      method: "GET",
+      headers: {
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+      },
+    });
+
+    if (!response.ok && response.status !== 404) {
+      throw new Error(`Supabase REST preflight returned HTTP ${response.status}`);
+    }
+  } catch (error) {
+    throw new Error(
+      `Supabase connection preflight failed. Check that NEXT_PUBLIC_SUPABASE_URL is the project API URL and the service role key is valid. Original error: ${error.message}`
+    );
+  }
+};
 
 const upsertChunk = async (table, rows, options = {}) => {
   if (!rows.length) return { count: 0 };
@@ -79,6 +99,8 @@ const criteriaRows = dataset.evaluationCriteria.map((item) => ({
 }));
 
 console.log("Dataset summary:", datasetSummary(dataset));
+
+await preflightSupabaseConnection();
 
 await upsertChunk("capability_library", capabilityRows, { onConflict: "external_id" });
 await upsertChunk("bid_history", bidRows, { onConflict: "bid_id" });
