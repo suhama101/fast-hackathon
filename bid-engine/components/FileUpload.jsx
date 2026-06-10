@@ -36,7 +36,23 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
     }
   };
 
-  const handlePickedFile = (file) => {
+  const readFileAsTextFallback = (file) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target.result;
+      setRfpText(text);
+      setAlertMsg({
+        type: "success",
+        text: `Loaded "${file.name}" in sample mode. For PDF/DOCX accuracy, run through the Next.js dashboard parser.`
+      });
+    };
+    reader.onerror = () => {
+      setAlertMsg({ type: "error", text: "Failed to parse the provided document text." });
+    };
+    reader.readAsText(file);
+  };
+
+  const handlePickedFile = async (file) => {
     setFileName(file.name);
     setAlertMsg(null);
     setProgress(10);
@@ -52,19 +68,28 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
       });
     }, 100);
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target.result;
-      setRfpText(text);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("title", file.name.replace(/\.[^.]+$/, ""));
+
+      const response = await fetch("/api/rfp/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Upload parser unavailable.");
+
+      setRfpText(data.rawText || "");
+      setProgress(100);
       setAlertMsg({
         type: "success",
-        text: `Successfully uploaded file "${file.name}"! Click "Analyze RFP" below to process with Groq AI client.`
+        text: `Parsed "${file.name}" on server (${data.characterCount || 0} characters). Click "Analyze RFP" to extract requirements.`
       });
-    };
-    reader.onerror = () => {
-      setAlertMsg({ type: "error", text: "Failed to parse the provided document text." });
-    };
-    reader.readAsText(file);
+    } catch (err) {
+      console.warn("Server upload parser unavailable; using text fallback.", err);
+      readFileAsTextFallback(file);
+    }
   };
 
   const handleSubmitText = () => {

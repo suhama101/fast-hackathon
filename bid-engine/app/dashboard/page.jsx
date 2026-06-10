@@ -158,13 +158,40 @@ export default function DashboardPage() {
       const response = await fetch("/api/rfp/match", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workspaceId: selectedWorkspaceId }),
+        body: JSON.stringify({ workspaceId: selectedWorkspaceId, requirements }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
 
-      // Successfully processed AI matching triggers
-      setAlert({ type: "success", text: "Smart compliance gap assessment finalized using Groq AI and capability libraries!" });
+      if (data.matches?.length) {
+        const nextMatrix = {};
+        data.matches.forEach((match) => {
+          const grade = match.compliance_status === "pass"
+            ? "Strong"
+            : match.compliance_status === "partial"
+            ? "Partial"
+            : "Poor";
+          nextMatrix[match.requirement_id] = {
+            matchGrade: grade,
+            status: match.compliance_status,
+            reasoning: `${match.reasoning} Confidence: ${match.confidence_score}%.`,
+            recommendation: match.compliance_status === "fail"
+              ? "Add partner evidence or create an exception response for this gap."
+              : "Attach this evidence in the proposal appendix.",
+            evidence: match.evidence
+          };
+        });
+        setMatchMatrix(nextMatrix);
+        setRequirements((current) => current.map((req) => {
+          const match = data.matches.find((item) => item.requirement_id === req.id);
+          return match ? { ...req, status: match.compliance_status } : req;
+        }));
+      }
+
+      setAlert({
+        type: "success",
+        text: `${data.mode === "sample_mode" ? "Sample mode: " : ""}Compliance gap assessment finalized using ${data.capability_count || 0} capability records.`
+      });
     } catch (err) {
       console.warn("Match endpoint fallbacks:", err);
       setTimeout(() => {
@@ -184,28 +211,32 @@ export default function DashboardPage() {
       const response = await fetch("/api/rfp/score", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workspaceId: selectedWorkspaceId }),
+        body: JSON.stringify({ workspaceId: selectedWorkspaceId, requirements, rawText: rfpText }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
 
-      if (data.record) {
+      if (data.record || data.scores) {
+        const scoreRecord = data.record || data.scores;
         setRatingAnalysis({
-          winScore: data.record.total_score,
+          winScore: scoreRecord.total_score,
           benchmarks: {
-            budgetAlignment: data.record.budget_alignment,
-            capabilityMatch: data.record.capability_match,
-            complianceScore: data.record.compliance_score,
-            riskBuffer: 75
+            budgetAlignment: scoreRecord.budget_alignment,
+            capabilityMatch: scoreRecord.capability_match,
+            complianceScore: scoreRecord.compliance_score,
+            riskBuffer: scoreRecord.evaluation_history_score || 75
           },
-          decision: data.record.decision,
+          decision: scoreRecord.decision,
           remedialActions: [
-            "Negotiate premium committed-use license thresholds before the July 25 deadline.",
-            "Incorporate structural service level diagrams in proposal draft appendix."
+            `Historical sector win rate: ${scoreRecord.sector_win_rate || data.scores?.sector_win_rate || 0}%.`,
+            `Similar experience score: ${scoreRecord.similar_experience_score || data.scores?.similar_experience_score || 0}%.`
           ]
         });
       }
-      setAlert({ type: "success", text: "Win prediction and risk analysis updated successfully!" });
+      setAlert({
+        type: "success",
+        text: `${data.mode === "sample_mode" ? "Sample mode: " : ""}Win prediction updated from ${data.history_count || 0} historical bid rows.`
+      });
     } catch (err) {
       console.warn("Prediction fallback active:", err);
       setTimeout(() => {

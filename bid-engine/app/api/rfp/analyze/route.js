@@ -1,6 +1,52 @@
 import { NextResponse } from "next/server";
 import { analyzeWithGroq } from "../../../../lib/groqClient";
 import { getSupabaseAdmin } from "../../../../lib/supabaseClient";
+import { loadHackathonDataset } from "../../../../lib/datasetLoader";
+
+const localExtract = (rawText) => {
+  const lines = String(rawText || "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^[-*\d.)\s]+/, "").trim())
+    .filter(Boolean);
+
+  const mandatory = lines.filter((line) => /\b(must|shall|required|mandatory|compliance|certification|sla|encryption)\b/i.test(line)).slice(0, 8);
+  const questions = lines.filter((line) => /\?|question\s+[a-z0-9]/i.test(line)).slice(0, 8);
+  const evaluation = lines.filter((line) => /\b(weight|score|criteria|evaluation|technical|pricing|commercial)\b/i.test(line)).slice(0, 8);
+  const deadline = String(rawText).match(/\b(?:deadline|submission).*?(\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2})/i)?.[1] || "";
+  const budget = String(rawText).match(/\b(?:budget|estimate|value|cost).*?(PKR|USD|\$)?\s?[\d,.]+\s?[MK]?/i)?.[0] || "";
+
+  return {
+    mandatory_requirements: mandatory.length ? mandatory : lines.slice(0, 4),
+    evaluation_criteria: evaluation,
+    submission_deadline: deadline,
+    budget_range: budget,
+    question_sections: questions,
+    compliance_clauses: mandatory.filter((line) => /certification|compliance|security|audit|iso|soc/i.test(line)),
+  };
+};
+
+const toRequirementRows = (extractedData, workspaceId = null) => {
+  const rowsToInsert = [];
+  const addRow = (text, type, value) => {
+    const cleanText = typeof text === "string" ? text.trim() : JSON.stringify(text);
+    if (!cleanText) return;
+    rowsToInsert.push({
+      ...(workspaceId ? { workspace_id: workspaceId } : {}),
+      requirement_text: cleanText,
+      requirement_type: type,
+      compliance_status: "partial",
+      extracted_value: value,
+    });
+  };
+
+  (extractedData.mandatory_requirements || []).forEach((item) => addRow(item, "mandatory", "Mandatory Core"));
+  (extractedData.compliance_clauses || []).forEach((item) => addRow(item, "mandatory", "Compliance Clause"));
+  (extractedData.evaluation_criteria || []).forEach((item) => addRow(item, "evaluation", "Evaluation Metric"));
+  (extractedData.question_sections || []).forEach((item) => addRow(item, "mandatory", "Question Section"));
+  if (extractedData.submission_deadline) addRow(`Submission Deadline Target: ${extractedData.submission_deadline}`, "deadline", String(extractedData.submission_deadline));
+  if (extractedData.budget_range) addRow(`Project Budget Range: ${extractedData.budget_range}`, "evaluation", String(extractedData.budget_range));
+  return rowsToInsert;
+};
 
 export async function POST(request) {
   try {
@@ -11,6 +57,29 @@ export async function POST(request) {
         { error: "No RFP textual content provided for analysis." },
         { status: 400 }
       );
+    }
+
+    const isTrialWorkspace = givenWorkspaceId && String(givenWorkspaceId).startsWith("ws-trial");
+    if (isTrialWorkspace) {
+      const dataset = loadHackathonDataset();
+      const extracted = localExtract(rawText);
+      const requirements = toRequirementRows(extracted).map((row, index) => ({
+        id: `REQ-${String(index + 1).padStart(3, "0")}`,
+        ...row,
+      }));
+
+      return NextResponse.json({
+        success: true,
+        mode: "sample_mode",
+        workspaceId: givenWorkspaceId,
+        extracted,
+        requirements,
+        dataset_counts: {
+          capability_library: dataset.capabilityLibrary.length,
+          bid_history: dataset.bidHistory.length,
+          evaluation_criteria_taxonomy: dataset.evaluationCriteria.length,
+        },
+      });
     }
 
     const supabase = getSupabaseAdmin();
@@ -52,89 +121,7 @@ ${rawText.slice(0, 18000)}`;
     const extractedData = await analyzeWithGroq(userPrompt, systemPrompt);
 
     // 3. Prepare requirements structure to populate database
-    const rowsToInsert = [];
-
-    // Map mandatory requirements
-    if (Array.isArray(extractedData.mandatory_requirements)) {
-      extractedData.mandatory_requirements.forEach((reqText) => {
-        if (reqText && reqText.trim()) {
-          rowsToInsert.push({
-            workspace_id: workspaceId,
-            requirement_text: reqText.trim(),
-            requirement_type: "mandatory",
-            compliance_status: "payload_pending" || "partial", // Default compliant starting grade
-            extracted_value: "Mandatory Core"
-          });
-        }
-      });
-    }
-
-    // Map compliance clauses
-    if (Array.isArray(extractedData.compliance_clauses)) {
-      extractedData.compliance_clauses.forEach((reqText) => {
-        if (reqText && reqText.trim()) {
-          rowsToInsert.push({
-            workspace_id: workspaceId,
-            requirement_text: reqText.trim(),
-            requirement_type: "mandatory",
-            compliance_status: "partial",
-            extracted_value: "Compliance Clause"
-          });
-        }
-      });
-    }
-
-    // Map evaluation criteria
-    if (Array.isArray(extractedData.evaluation_criteria)) {
-      extractedData.evaluation_criteria.forEach((reqText) => {
-        if (reqText && reqText.trim()) {
-          rowsToInsert.push({
-            workspace_id: workspaceId,
-            requirement_text: reqText.trim(),
-            requirement_type: "evaluation",
-            compliance_status: "partial",
-            extracted_value: "Evaluation Metric"
-          });
-        }
-      });
-    }
-
-    // Map submission deadline
-    if (extractedData.submission_deadline && String(extractedData.submission_deadline).trim()) {
-      rowsToInsert.push({
-        workspace_id: workspaceId,
-        requirement_text: `Submission Deadline Target: ${String(extractedData.submission_deadline).trim()}`,
-        requirement_type: "deadline",
-        compliance_status: "partial",
-        extracted_value: String(extractedData.submission_deadline).trim()
-      });
-    }
-
-    // Map budget range
-    if (extractedData.budget_range && String(extractedData.budget_range).trim()) {
-      rowsToInsert.push({
-        workspace_id: workspaceId,
-        requirement_text: `Project Budget Range: ${String(extractedData.budget_range).trim()}`,
-        requirement_type: "evaluation",
-        compliance_status: "partial",
-        extracted_value: String(extractedData.budget_range).trim()
-      });
-    }
-
-    // Keep active note of Question Sections in key indicators
-    if (Array.isArray(extractedData.question_sections)) {
-      extractedData.question_sections.forEach((qText) => {
-        if (qText && qText.trim()) {
-          rowsToInsert.push({
-            workspace_id: workspaceId,
-            requirement_text: qText.trim(),
-            requirement_type: "mandatory",
-            compliance_status: "partial",
-            extracted_value: "Question Section"
-          });
-        }
-      });
-    }
+    const rowsToInsert = toRequirementRows(extractedData, workspaceId);
 
     // 4. Save rows to Supabase database
     if (rowsToInsert.length > 0) {

@@ -1,4 +1,4 @@
-import pdfParse from "pdf-parse";
+import { PDFParse } from "pdf-parse";
 import mammoth from "mammoth";
 
 /**
@@ -8,7 +8,9 @@ import mammoth from "mammoth";
  */
 export async function extractTextFromPDF(buffer) {
   try {
-    const data = await pdfParse(buffer);
+    const parser = new PDFParse({ data: buffer });
+    const data = await parser.getText();
+    await parser.destroy();
     return cleanText(data.text || "");
   } catch (error) {
     console.error("Error parsing PDF with pdf-parse:", error);

@@ -1,115 +1,113 @@
 import { NextResponse } from "next/server";
-import { analyzeWithGroq } from "../../../../lib/groqClient";
 import { getSupabaseAdmin } from "../../../../lib/supabaseClient";
+import { loadHackathonDataset } from "../../../../lib/datasetLoader";
+import { matchRequirementToCapabilities } from "../../../../lib/datasetAnalysis";
+
+const normalizeRequirement = (req, index = 0) => ({
+  id: req.id || `REQ-${String(index + 1).padStart(3, "0")}`,
+  requirement_text: req.requirement_text || req.description || req.title || "",
+  requirement_type: req.requirement_type || "mandatory",
+  compliance_status: req.compliance_status || "partial",
+});
 
 export async function POST(request) {
   try {
-    const { workspaceId } = await request.json();
+    const { workspaceId, requirements: clientRequirements = [] } = await request.json();
+    const supabase = getSupabaseAdmin();
+    let mode = "dataset";
+    let requirements = [];
+    let capabilities = [];
 
-    if (!workspaceId) {
-      return NextResponse.json(
-        { error: "Missing required workspaceId parameter." },
-        { status: 400 }
-      );
+    if (workspaceId && !String(workspaceId).startsWith("ws-trial")) {
+      const { data: dbRequirements, error: reqError } = await supabase
+        .from("rfp_requirements")
+        .select("*")
+        .eq("workspace_id", workspaceId);
+
+      if (reqError) throw reqError;
+      requirements = dbRequirements || [];
     }
 
-    const supabase = getSupabaseAdmin();
-
-    // 1. Load active RFP requirements for this workspace
-    const { data: requirements, error: reqError } = await supabase
-      .from("rfp_requirements")
-      .select("*")
-      .eq("workspace_id", workspaceId);
-
-    if (reqError || !requirements) {
-      throw new Error(`Failed to load requirements from database: ${reqError?.message}`);
+    if (requirements.length === 0 && clientRequirements.length > 0) {
+      mode = "sample_mode";
+      requirements = clientRequirements.map(normalizeRequirement);
     }
 
     if (requirements.length === 0) {
       return NextResponse.json({
         success: true,
-        message: "No requirements found for this workspace. Run extraction first.",
-        matches: []
+        mode,
+        message: "No requirements found. Run extraction first.",
+        matches: [],
+        requirements: [],
       });
     }
 
-    // 2. Load the capability library from Supabase
-    const { data: capabilities, error: capError } = await supabase
+    const { data: dbCapabilities, error: capError } = await supabase
       .from("capability_library")
       .select("*");
 
-    if (capError) {
-      throw new Error(`Failed to read capabilities library: ${capError.message}`);
+    if (!capError && dbCapabilities?.length) {
+      capabilities = dbCapabilities;
+    } else {
+      const dataset = loadHackathonDataset();
+      mode = "sample_mode";
+      capabilities = dataset.capabilityLibrary;
     }
 
-    // 3. Compile matching context for Groq
-    const systemPrompt = "You are an expert enterprise bid evaluator. Perform a precise analysis comparing requirements against operational capabilities in JSON format.";
-    
-    const userPrompt = `Compare these RFP requirements with our Organization's Capability Library. Determine if each requirement has sufficient evidence of capability.
-
-REQUIREMENTS:
-${JSON.stringify(requirements.map(r => ({ id: r.id, text: r.requirement_text, type: r.requirement_type })))}
-
-ORGANIZATION CAPABILITY LIBRARY:
-${JSON.stringify(capabilities.map(c => ({
-  project: c.project_name,
-  description: c.description,
-  skills: c.skills,
-  certifications: c.certifications,
-  contract_value: c.contract_value
-})))}
-
-Output a JSON object with a single property "matches" containing a list of objects. Each object MUST contain:
-- "requirement_id": corresponding requirement id from the list
-- "compliance_status": must be either "pass", "fail", or "partial" (be strict: only mark "pass" if there is clear, direct evidence of compliance)
-- "reasoning": detailed reason for this rating
-- "evidence": specific client, project, or certification identified as supporting proof/evidence
-
-Return ONLY a valid JSON object structure.`;
-
-    // Invoke Llama 3 API for mapping compliance
-    const aiResponse = await analyzeWithGroq(userPrompt, systemPrompt);
-    const matchesList = aiResponse.matches || [];
-
-    // 4. Group matches and update values inside Supabase
-    const updatePromises = matchesList.map(async (match) => {
-      const { requirement_id, compliance_status } = match;
-      if (!requirement_id) return;
-
-      // Validate status
-      const cleanStatus = ["pass", "fail", "partial"].includes(compliance_status)
-        ? compliance_status
-        : "partial";
-
-      return supabase
-        .from("rfp_requirements")
-        .update({
-          compliance_status: cleanStatus,
-          extracted_value: match.evidence || "Mapped via AI"
-        })
-        .eq("id", requirement_id)
-        .eq("workspace_id", workspaceId);
+    const matches = requirements.map((requirement, index) => {
+      const normalized = normalizeRequirement(requirement, index);
+      const match = matchRequirementToCapabilities(normalized, capabilities);
+      return {
+        requirement_id: normalized.id,
+        requirement_text: normalized.requirement_text,
+        compliance_status: match.compliance_status,
+        confidence_score: match.confidence,
+        evidence: match.evidence,
+        reasoning: match.reasoning,
+      };
     });
 
-    await Promise.all(updatePromises);
+    if (workspaceId && !String(workspaceId).startsWith("ws-trial")) {
+      await Promise.all(matches.map((match) =>
+        supabase
+          .from("rfp_requirements")
+          .update({
+            compliance_status: match.compliance_status,
+            extracted_value: match.evidence,
+            matched_evidence: match.evidence,
+            match_confidence: match.confidence_score,
+            match_reasoning: match.reasoning,
+          })
+          .eq("id", match.requirement_id)
+          .eq("workspace_id", workspaceId)
+      ));
+    }
 
-    // Fetch the updated requirements list to return fresh data
-    const { data: refreshedRequirements } = await supabase
-      .from("rfp_requirements")
-      .select("*")
-      .eq("workspace_id", workspaceId);
+    const requirementsWithMatches = requirements.map((requirement, index) => {
+      const normalized = normalizeRequirement(requirement, index);
+      const match = matches.find((item) => item.requirement_id === normalized.id);
+      return {
+        ...requirement,
+        compliance_status: match?.compliance_status || "partial",
+        matched_evidence: match?.evidence,
+        match_confidence: match?.confidence_score,
+        match_reasoning: match?.reasoning,
+      };
+    });
 
     return NextResponse.json({
       success: true,
+      mode,
       workspaceId,
-      matches: matchesList,
-      requirements: refreshedRequirements || requirements
+      matches,
+      requirements: requirementsWithMatches,
+      capability_count: capabilities.length,
     });
-
   } catch (err) {
     console.error("Failure in matching route:", err);
     return NextResponse.json(
-      { error: "Matching system encountered error: " + err.message },
+      { success: false, mode: "sample_mode_unavailable", error: "Matching system encountered error: " + err.message },
       { status: 500 }
     );
   }

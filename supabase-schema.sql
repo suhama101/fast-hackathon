@@ -34,6 +34,9 @@ create table if not exists rfp_requirements (
   requirement_type text not null check (requirement_type in ('mandatory', 'evaluation', 'deadline')),
   compliance_status text not null check (compliance_status in ('pass', 'fail', 'partial')),
   extracted_value text,
+  matched_evidence text,
+  match_confidence numeric check (match_confidence is null or (match_confidence >= 0 and match_confidence <= 100)),
+  match_reasoning text,
   created_at timestamptz default timezone('utc'::text, now()) not null
 );
 
@@ -75,11 +78,16 @@ create policy "Users can construct/modify requirements of their workspaces"
 create table if not exists capability_library (
   id uuid default gen_random_uuid() primary key,
   user_id uuid references auth.users(id) on delete cascade default auth.uid(),
+  external_id text unique,
+  domain text,
   project_name text not null,
   description text not null,
+  project_summary text,
+  certification text,
   skills text[] default '{}'::text[] not null,
   year_completed integer not null,
   contract_value text,
+  duration_months integer,
   client_type text,
   certifications text[] default '{}'::text[] not null,
   created_at timestamptz default timezone('utc'::text, now()) not null
@@ -96,7 +104,52 @@ create policy "Users can modify and read their own capability listings"
   with check (auth.uid() = user_id);
 
 
--- 4. PROPOSAL DRAFTS TABLE
+-- 4. HISTORICAL BID OUTCOMES TABLE
+create table if not exists bid_history (
+  id uuid default gen_random_uuid() primary key,
+  bid_id text unique not null,
+  client text,
+  sector text not null,
+  budget text,
+  score_percent numeric check (score_percent is null or (score_percent >= 0 and score_percent <= 100)),
+  outcome text not null check (outcome in ('win', 'loss')),
+  response_time_hrs numeric,
+  compliance_percent numeric check (compliance_percent is null or (compliance_percent >= 0 and compliance_percent <= 100)),
+  doc_pages integer,
+  gaps_found integer,
+  bid_manager text,
+  submission_date date,
+  created_at timestamptz default timezone('utc'::text, now()) not null
+);
+
+alter table bid_history enable row level security;
+
+create policy "Authenticated users can read bid history"
+  on bid_history
+  for select
+  using (auth.role() = 'authenticated');
+
+
+-- 5. EVALUATION CRITERIA TAXONOMY TABLE
+create table if not exists evaluation_criteria_taxonomy (
+  id uuid default gen_random_uuid() primary key,
+  criteria_name text not null,
+  sector text not null,
+  weight_percentage numeric check (weight_percentage is null or (weight_percentage >= 0 and weight_percentage <= 100)),
+  description text,
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  unique(criteria_name, sector)
+);
+
+alter table evaluation_criteria_taxonomy enable row level security;
+
+create policy "Authenticated users can read evaluation taxonomy"
+  on evaluation_criteria_taxonomy
+  for select
+  using (auth.role() = 'authenticated');
+
+
+-- 6. PROPOSAL DRAFTS TABLE
 create table if not exists proposal_drafts (
   id uuid default gen_random_uuid() primary key,
   workspace_id uuid references rfp_workspaces(id) on delete cascade not null,
@@ -140,7 +193,7 @@ create policy "Users can create and update drafts of their workspaces"
   );
 
 
--- 5. WIN SCORES TABLE
+-- 7. WIN SCORES TABLE
 create table if not exists win_scores (
   id uuid default gen_random_uuid() primary key,
   workspace_id uuid references rfp_workspaces(id) on delete cascade unique not null,
@@ -148,6 +201,9 @@ create table if not exists win_scores (
   budget_alignment numeric not null check (budget_alignment >= 0 and budget_alignment <= 100),
   capability_match numeric not null check (capability_match >= 0 and capability_match <= 100),
   compliance_score numeric not null check (compliance_score >= 0 and compliance_score <= 100),
+  sector_win_rate numeric check (sector_win_rate is null or (sector_win_rate >= 0 and sector_win_rate <= 100)),
+  similar_experience_score numeric check (similar_experience_score is null or (similar_experience_score >= 0 and similar_experience_score <= 100)),
+  evaluation_history_score numeric check (evaluation_history_score is null or (evaluation_history_score >= 0 and evaluation_history_score <= 100)),
   decision text not null check (decision in ('GO', 'NO-GO')),
   created_at timestamptz default timezone('utc'::text, now()) not null
 );

@@ -1,146 +1,93 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "../../../lib/supabaseClient";
-import { CAPABILITY_LIBRARY, BID_HISTORY, EVALUATION_CRITERIA_TAXONOMY } from "../../../lib/sampleData";
+import { loadHackathonDataset, datasetSummary } from "../../../lib/datasetLoader";
 
-export async function POST(request) {
+export async function GET() {
+  const dataset = loadHackathonDataset();
+  return NextResponse.json({
+    success: true,
+    message: "Dataset inspection completed.",
+    summary: datasetSummary(dataset),
+  });
+}
+
+export async function POST() {
   try {
     const supabase = getSupabaseAdmin();
+    const dataset = loadHackathonDataset();
 
-    let capabilitySeededCount = 0;
-    let bidHistorySeededCount = 0;
-    let criteriaSeededCount = 0;
-    
-    let capabilitySkipped = false;
-    let bidHistorySkipped = false;
-    let criteriaSkipped = false;
+    const capabilityRows = dataset.capabilityLibrary.map((item) => ({
+      external_id: item.external_id,
+      domain: item.domain,
+      project_name: item.project_name,
+      description: item.description,
+      project_summary: item.project_summary,
+      certification: item.certification,
+      certifications: item.certifications,
+      skills: item.skills,
+      year_completed: item.year_completed,
+      contract_value: item.contract_value,
+      duration_months: item.duration_months,
+      client_type: item.client_type,
+    }));
 
-    let warnings = [];
+    const bidRows = dataset.bidHistory.map((item) => ({
+      bid_id: item.bid_id,
+      client: item.client,
+      sector: item.sector,
+      budget: item.budget,
+      score_percent: item.score_percent,
+      outcome: item.outcome,
+      response_time_hrs: item.response_time_hrs,
+      compliance_percent: item.compliance_percent,
+      doc_pages: item.doc_pages,
+      gaps_found: item.gaps_found,
+      bid_manager: item.bid_manager,
+      submission_date: item.submission_date,
+    }));
 
-    // 1. Seed Capability Library
-    try {
-      const { count, error: countError } = await supabase
-        .from("capability_library")
-        .select("*", { count: "exact", head: true });
+    const criteriaRows = dataset.evaluationCriteria.map((item) => ({
+      criteria_name: item.criteria_name,
+      sector: item.sector,
+      weight_percentage: item.weight_percentage,
+      description: item.description,
+    }));
 
-      if (countError) {
-        throw new Error(`Failed to check existing capabilities count: ${countError.message}`);
-      }
+    const results = {};
 
-      if (count === 0) {
-        // Map elements to omit local IDs because DB expects valid UUIDs for PK 'id'
-        const uploadPayload = CAPABILITY_LIBRARY.map(({ id, ...rest }) => rest);
-        
-        const { error: insertError } = await supabase
-          .from("capability_library")
-          .insert(uploadPayload);
+    const { error: capabilityError } = await supabase
+      .from("capability_library")
+      .upsert(capabilityRows, { onConflict: "external_id" });
+    if (capabilityError) throw capabilityError;
+    results.capability_library = capabilityRows.length;
 
-        if (insertError) {
-          throw new Error(`Failed to insert into capability_library: ${insertError.message}`);
-        }
-        capabilitySeededCount = uploadPayload.length;
-      } else {
-        capabilitySkipped = true;
-      }
-    } catch (err) {
-      console.warn("Capability Library seeding skipped/unsupported:", err.message);
-      warnings.push(`Capability Library Seed Alert: ${err.message}`);
-    }
+    const { error: bidError } = await supabase
+      .from("bid_history")
+      .upsert(bidRows, { onConflict: "bid_id" });
+    if (bidError) throw bidError;
+    results.bid_history = bidRows.length;
 
-    // 2. Seed Bid History
-    try {
-      const { count, error: countError } = await supabase
-        .from("bid_history")
-        .select("*", { count: "exact", head: true });
+    const { error: criteriaError } = await supabase
+      .from("evaluation_criteria_taxonomy")
+      .upsert(criteriaRows, { onConflict: "criteria_name,sector" });
+    if (criteriaError) throw criteriaError;
+    results.evaluation_criteria_taxonomy = criteriaRows.length;
 
-      if (!countError) {
-        if (count === 0) {
-          const { error: insertError } = await supabase
-            .from("bid_history")
-            .insert(BID_HISTORY);
-
-          if (insertError) {
-            throw new Error(`Failed to insert into bid_history: ${insertError.message}`);
-          }
-          bidHistorySeededCount = BID_HISTORY.length;
-        } else {
-          bidHistorySkipped = true;
-        }
-      } else {
-        warnings.push("Table 'bid_history' does not exist in target database schema. Dataset exported to code module.");
-      }
-    } catch (err) {
-      console.warn("Bid History seeding skipped/unsupported:", err.message);
-      warnings.push(`Bid History Seed Alert: ${err.message}`);
-    }
-
-    // 3. Seed Evaluation Criteria Taxonomy
-    try {
-      const { count, error: countError } = await supabase
-        .from("evaluation_criteria_taxonomy")
-        .select("*", { count: "exact", head: true });
-
-      if (!countError) {
-        if (count === 0) {
-          const { error: insertError } = await supabase
-            .from("evaluation_criteria_taxonomy")
-            .insert(EVALUATION_CRITERIA_TAXONOMY);
-
-          if (insertError) {
-            throw new Error(`Failed to insert into evaluation_criteria_taxonomy: ${insertError.message}`);
-          }
-          criteriaSeededCount = EVALUATION_CRITERIA_TAXONOMY.length;
-        } else {
-          criteriaSkipped = true;
-        }
-      } else {
-        warnings.push("Table 'evaluation_criteria_taxonomy' does not exist in target database schema. Dataset exported to code module.");
-      }
-    } catch (err) {
-      console.warn("Evaluation Criteria Taxonomy seeding skipped/unsupported:", err.message);
-      warnings.push(`Evaluation Criteria Taxonomy Seed Alert: ${err.message}`);
-    }
-
-    // Assemble status summary response
     return NextResponse.json({
       success: true,
-      message: "BidEngine AI dataset seed processing completed.",
-      summary: {
-        capability_library: {
-          seeded: capabilitySeededCount,
-          skipped: capabilitySkipped,
-          message: capabilitySeededCount > 0 
-            ? `Successfully seeded ${capabilitySeededCount} robust capability listings!`
-            : capabilitySkipped 
-            ? "Table contains existing rows. Skipped to prevent duplicates." 
-            : "No records processed."
-        },
-        bid_history: {
-          seeded: bidHistorySeededCount,
-          skipped: bidHistorySkipped,
-          message: bidHistorySeededCount > 0 
-            ? `Successfully seeded ${bidHistorySeededCount} historical bids!`
-            : bidHistorySkipped 
-            ? "Table contains existing rows. Skipped to prevent duplicates." 
-            : "No records processed."
-        },
-        evaluation_criteria_taxonomy: {
-          seeded: criteriaSeededCount,
-          skipped: criteriaSkipped,
-          message: criteriaSeededCount > 0 
-            ? `Successfully seeded ${criteriaSeededCount} evaluation parameters!`
-            : criteriaSkipped 
-            ? "Table contains existing rows. Skipped to prevent duplicates." 
-            : "No records processed."
-        }
-      },
-      warnings: warnings.length > 0 ? warnings : null
-    }, { status: 200 });
-
+      mode: dataset.source === "excel" ? "dataset" : "sample_mode",
+      message: dataset.source === "excel"
+        ? "Excel dataset imported into Supabase."
+        : "Workbook unavailable; imported bundled sample mode dataset.",
+      imported: results,
+      summary: datasetSummary(dataset),
+    });
   } catch (err) {
-    console.error("Critical error in seed handler:", err);
+    console.error("Dataset seed route error:", err);
     return NextResponse.json({
       success: false,
-      error: "Failed to process database seed request: " + err.message
+      mode: "sample_mode_unavailable",
+      error: "Failed to import dataset: " + err.message,
     }, { status: 500 });
   }
 }
