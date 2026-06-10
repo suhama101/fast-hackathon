@@ -1,12 +1,27 @@
-import "dotenv/config";
+import path from "path";
+import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import { loadHackathonDataset, datasetSummary } from "../lib/datasetLoader.js";
+
+[
+  path.resolve(process.cwd(), ".env.local"),
+  path.resolve(process.cwd(), ".env"),
+  path.resolve(process.cwd(), "../.env.local"),
+  path.resolve(process.cwd(), "../.env"),
+].forEach((envPath) => {
+  dotenv.config({ path: envPath, override: false, quiet: true });
+});
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !serviceKey) {
   console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.");
+  process.exit(1);
+}
+
+if (/supabase\.com\/dashboard|supabase\.com\/project/i.test(supabaseUrl)) {
+  console.error("NEXT_PUBLIC_SUPABASE_URL must be the project API URL, e.g. https://<project-ref>.supabase.co, not a Supabase dashboard URL.");
   process.exit(1);
 }
 
@@ -48,6 +63,12 @@ const bidRows = dataset.bidHistory.map((item) => ({
   gaps_found: item.gaps_found,
   bid_manager: item.bid_manager,
   submission_date: item.submission_date,
+  competitor_presence: item.competitor_presence,
+  incumbent_vendor: item.incumbent_vendor,
+  technical_score: item.technical_score,
+  commercial_score: item.commercial_score,
+  risk_score: item.risk_score,
+  strategic_fit_score: item.strategic_fit_score,
 }));
 
 const criteriaRows = dataset.evaluationCriteria.map((item) => ({

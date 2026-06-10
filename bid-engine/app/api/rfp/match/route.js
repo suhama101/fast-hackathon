@@ -3,6 +3,9 @@ import { getSupabaseAdmin } from "../../../../lib/supabaseClient";
 import { loadHackathonDataset } from "../../../../lib/datasetLoader";
 import { matchRequirementToCapabilities } from "../../../../lib/datasetAnalysis";
 
+const isUuid = (value) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+
 const normalizeRequirement = (req, index = 0) => ({
   id: req.id || `REQ-${String(index + 1).padStart(3, "0")}`,
   requirement_text: req.requirement_text || req.description || req.title || "",
@@ -12,13 +15,13 @@ const normalizeRequirement = (req, index = 0) => ({
 
 export async function POST(request) {
   try {
-    const { workspaceId, requirements: clientRequirements = [] } = await request.json();
+    const { workspaceId, requirements: clientRequirements = [], entities: clientEntities = null } = await request.json();
     const supabase = getSupabaseAdmin();
     let mode = "dataset";
     let requirements = [];
     let capabilities = [];
 
-    if (workspaceId && !String(workspaceId).startsWith("ws-trial")) {
+    if (workspaceId && isUuid(workspaceId)) {
       const { data: dbRequirements, error: reqError } = await supabase
         .from("rfp_requirements")
         .select("*")
@@ -55,9 +58,25 @@ export async function POST(request) {
       capabilities = dataset.capabilityLibrary;
     }
 
+    const entityContext = clientEntities || {
+      deadlines: requirements
+        .filter((req) => req.requirement_type === "deadline")
+        .map((req) => req.extracted_value || req.requirement_text)
+        .filter(Boolean),
+      budgets: requirements
+        .filter((req) => /\bbudget|pkr|usd|\$|rs\.?/i.test(`${req.extracted_value || ""} ${req.requirement_text || ""}`))
+        .map((req) => req.extracted_value || req.requirement_text)
+        .filter(Boolean),
+      mandatory_clauses: requirements
+        .filter((req) => req.requirement_type === "mandatory")
+        .map((req) => req.requirement_text)
+        .filter(Boolean)
+        .slice(0, 10),
+    };
+
     const matches = requirements.map((requirement, index) => {
       const normalized = normalizeRequirement(requirement, index);
-      const match = matchRequirementToCapabilities(normalized, capabilities);
+      const match = matchRequirementToCapabilities(normalized, capabilities, { entities: entityContext });
       return {
         requirement_id: normalized.id,
         requirement_text: normalized.requirement_text,
@@ -68,7 +87,7 @@ export async function POST(request) {
       };
     });
 
-    if (workspaceId && !String(workspaceId).startsWith("ws-trial")) {
+    if (workspaceId && isUuid(workspaceId)) {
       await Promise.all(matches.map((match) =>
         supabase
           .from("rfp_requirements")
@@ -103,6 +122,7 @@ export async function POST(request) {
       matches,
       requirements: requirementsWithMatches,
       capability_count: capabilities.length,
+      extracted_entities: entityContext,
     });
   } catch (err) {
     console.error("Failure in matching route:", err);

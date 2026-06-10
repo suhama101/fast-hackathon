@@ -2,13 +2,51 @@ import { NextResponse } from "next/server";
 import { analyzeWithGroq } from "../../../../lib/groqClient";
 import { getSupabaseAdmin } from "../../../../lib/supabaseClient";
 
+const isUuid = (value) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+
+export async function GET(request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const workspaceId = searchParams.get("workspaceId");
+
+    if (!isUuid(workspaceId)) {
+      return NextResponse.json(
+        { error: "A valid workspaceId UUID is required." },
+        { status: 400 }
+      );
+    }
+
+    const supabase = getSupabaseAdmin();
+    const { data: drafts, error } = await supabase
+      .from("proposal_drafts")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .order("created_at", { ascending: true });
+
+    if (error) throw error;
+
+    return NextResponse.json({
+      success: true,
+      workspaceId,
+      drafts: drafts || [],
+    });
+  } catch (err) {
+    console.error("Proposal drafts load failure:", err);
+    return NextResponse.json(
+      { error: "Failed to load proposal drafts: " + err.message },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(request) {
   try {
     const { workspaceId } = await request.json();
 
-    if (!workspaceId) {
+    if (!isUuid(workspaceId)) {
       return NextResponse.json(
-        { error: "Missing required workspaceId parameter." },
+        { error: "A valid workspaceId UUID is required." },
         { status: 400 }
       );
     }
@@ -40,6 +78,26 @@ export async function POST(request) {
       });
     }
 
+    const extractedEntities = {
+      deadlines: requirements
+        .filter((req) => req.requirement_type === "deadline")
+        .map((req) => req.extracted_value || req.requirement_text)
+        .filter(Boolean),
+      budgets: requirements
+        .filter((req) => /\bbudget|pkr|usd|\$|rs\.?/i.test(`${req.extracted_value || ""} ${req.requirement_text || ""}`))
+        .map((req) => req.extracted_value || req.requirement_text)
+        .filter(Boolean),
+      mandatory_clauses: requirements
+        .filter((req) => req.requirement_type === "mandatory")
+        .map((req) => req.requirement_text)
+        .filter(Boolean)
+        .slice(0, 12),
+      mapped_criteria: requirements
+        .filter((req) => req.requirement_type === "evaluation" && /Taxonomy:/i.test(req.extracted_value || ""))
+        .map((req) => req.extracted_value)
+        .filter(Boolean),
+    };
+
     // 2. Load the capability library for reference evidence
     const { data: capabilities, error: capError } = await supabase
       .from("capability_library")
@@ -55,14 +113,26 @@ export async function POST(request) {
     const userPrompt = `Generate a completed proposal document responding to the retrieved RFP questions/requirements.
 
 SECTIONS TO COMPLY WITH:
-${JSON.stringify(targets.map(t => ({ id: t.id, text: t.requirement_text })))}
+${JSON.stringify(targets.map(t => ({
+  id: t.id,
+  text: t.requirement_text,
+  matched_evidence: t.matched_evidence,
+  confidence: t.match_confidence,
+  compliance_status: t.compliance_status,
+})))}
+
+EXTRACTED ENTITIES AND TAXONOMY CONTEXT:
+${JSON.stringify(extractedEntities)}
 
 OUR CAPABILITY LIBRARY EXCERPTS:
 ${JSON.stringify(capabilities.slice(0, 10).map(c => ({
   project: c.project_name,
-  description: c.description,
+  description: c.project_summary || c.description,
   skills: c.skills,
-  certifications: c.certifications
+  certifications: c.certifications,
+  certification: c.certification,
+  contract_value: c.contract_value,
+  client_type: c.client_type
 })))}
 
 For each section/requirement item:
@@ -123,6 +193,47 @@ Return ONLY valid JSON.`;
     console.error("Proposal drafting route failure:", err);
     return NextResponse.json(
       { error: "Drafting engine encountered error: " + err.message },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(request) {
+  try {
+    const { draftId, content, status } = await request.json();
+
+    if (!isUuid(draftId)) {
+      return NextResponse.json(
+        { error: "A valid draftId UUID is required." },
+        { status: 400 }
+      );
+    }
+
+    const nextStatus = ["ai_generated", "edited", "approved"].includes(status)
+      ? status
+      : "edited";
+
+    const supabase = getSupabaseAdmin();
+    const { data, error } = await supabase
+      .from("proposal_drafts")
+      .update({
+        content: String(content || ""),
+        status: nextStatus,
+      })
+      .eq("id", draftId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return NextResponse.json({
+      success: true,
+      draft: data,
+    });
+  } catch (err) {
+    console.error("Proposal draft save failure:", err);
+    return NextResponse.json(
+      { error: "Failed to save proposal draft: " + err.message },
       { status: 500 }
     );
   }

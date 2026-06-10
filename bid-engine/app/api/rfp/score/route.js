@@ -3,6 +3,9 @@ import { getSupabaseAdmin } from "../../../../lib/supabaseClient";
 import { loadHackathonDataset } from "../../../../lib/datasetLoader";
 import { calculateWinScore } from "../../../../lib/datasetAnalysis";
 
+const isUuid = (value) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+
 const normalizeRequirement = (req, index = 0) => ({
   id: req.id || `REQ-${String(index + 1).padStart(3, "0")}`,
   requirement_text: req.requirement_text || req.description || req.title || "",
@@ -19,14 +22,24 @@ export async function POST(request) {
     let requirements = [];
     let bidHistory = [];
     let capabilities = [];
+    let workspaceRawText = "";
 
-    if (workspaceId && !String(workspaceId).startsWith("ws-trial")) {
-      const { data: dbRequirements, error: reqError } = await supabase
-        .from("rfp_requirements")
-        .select("*")
-        .eq("workspace_id", workspaceId);
+    if (workspaceId && isUuid(workspaceId)) {
+      const [{ data: dbRequirements, error: reqError }, { data: workspace, error: workspaceError }] = await Promise.all([
+        supabase
+          .from("rfp_requirements")
+          .select("*")
+          .eq("workspace_id", workspaceId),
+        supabase
+          .from("rfp_workspaces")
+          .select("raw_text")
+          .eq("id", workspaceId)
+          .maybeSingle(),
+      ]);
       if (reqError) throw reqError;
+      if (workspaceError) throw workspaceError;
       requirements = dbRequirements || [];
+      workspaceRawText = workspace?.raw_text || "";
     }
 
     if (requirements.length === 0) {
@@ -53,11 +66,11 @@ export async function POST(request) {
       requirements: requirements.map(normalizeRequirement),
       capabilities,
       bidHistory,
-      rawText,
+      rawText: rawText || workspaceRawText,
     });
 
     let record = null;
-    if (workspaceId && !String(workspaceId).startsWith("ws-trial")) {
+    if (workspaceId && isUuid(workspaceId)) {
       const { data: savedScore, error: dbError } = await supabase
         .from("win_scores")
         .upsert({
@@ -69,6 +82,10 @@ export async function POST(request) {
           sector_win_rate: scores.sector_win_rate,
           similar_experience_score: scores.similar_experience_score,
           evaluation_history_score: scores.evaluation_history_score,
+          technical_history_score: scores.technical_history_score,
+          commercial_history_score: scores.commercial_history_score,
+          strategic_fit_score: scores.strategic_fit_score,
+          risk_penalty_score: scores.risk_penalty_score,
           decision: scores.decision,
         }, { onConflict: "workspace_id" })
         .select()
@@ -91,6 +108,10 @@ export async function POST(request) {
         sector_win_rate: scores.sector_win_rate,
         similar_experience_score: scores.similar_experience_score,
         evaluation_history_score: scores.evaluation_history_score,
+        technical_history_score: scores.technical_history_score,
+        commercial_history_score: scores.commercial_history_score,
+        strategic_fit_score: scores.strategic_fit_score,
+        risk_penalty_score: scores.risk_penalty_score,
         decision: scores.decision,
       },
       history_count: bidHistory.length,

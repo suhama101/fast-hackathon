@@ -33,35 +33,18 @@ export default function DashboardPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(true);
 
   // Workspace tracking state
-  const [workspaces, setWorkspaces] = useState([
-    { id: "ws-trial-1", title: "Enterprise Cloud SOW", status: "Active" },
-    { id: "ws-trial-2", title: "Department Cybersecurity SOW", status: "Draft" },
-    { id: "ws-trial-3", title: "Global Logistics Bid", status: "Needs Review" }
-  ]);
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("ws-trial-1");
+  const [workspaces, setWorkspaces] = useState([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(null);
+  const [workspaceMode, setWorkspaceMode] = useState("loading");
 
   // RFP & AI State parameters
   const [rfpText, setRfpText] = useState("");
-  const [requirements, setRequirements] = useState([
-    { id: "SEC-001", title: "SOC 2 Type II Credentials", category: "Security", severity: "Critical", status: "pass", description: "Candidate engine MUST hold SOC 2 Type II audit certifications verified by high performance credential bodies." },
-    { id: "TEC-002", title: "99.99% Uptime SLA", category: "Technical", severity: "Critical", status: "pass", description: "Proposed solutions must operate with stable throughput constraints supporting 99.9% uptime and dynamic horizontal auto-scaling." },
-    { id: "COMM-003", title: "Itemized Operational Licences", category: "Commercial", severity: "Important", status: "partial", description: "Provide comprehensive line-by-line financial metrics clarifying core operating license fees and dedicated training packages." },
-    { id: "EXP-004", title: "Multi-Node Deliveries SOW", category: "Experience", severity: "Standard", status: "fail", description: "Must provide minimum of 3 past customer success evidence benchmarks delivering multi-node database systems." }
-  ]);
+  const [requirements, setRequirements] = useState([]);
   const [selectedRequirement, setSelectedRequirement] = useState(null);
-  const [matchMatrix, setMatchMatrix] = useState({
-    "SEC-001": { matchGrade: "Outstanding", reasoning: "Holds active SOC 2 verification certificates.", status: "pass", evidence: "SOC 2 Type II Certification signed April 2026." },
-    "TEC-002": { matchGrade: "Strong", reasoning: "Operational pipeline fits 99.99% uptime with cluster redundancy.", status: "pass", evidence: "High-Availability Multi-Region Kubernetes setups." },
-    "COMM-003": { matchGrade: "Partial", reasoning: "Annual tiers exist but lacks dedicated multi-year discount matrices.", status: "partial", evidence: "Standard Custom Contract SLA pricing." },
-    "EXP-004": { matchGrade: "Unmatched", reasoning: "Lacks explicit multi-node portfolio evidence in library database.", status: "fail", evidence: "No immediate prior matching project of size." }
-  });
+  const [matchMatrix, setMatchMatrix] = useState({});
   
   // Drafting Section content
-  const [proposalDrafts, setProposalDrafts] = useState([
-    { id: "d-1", section: "1. Security & Compliance", content: "We fully comply with SEC-001 guidelines. Our system holds verified SOC 2 Type II audit certifications updated annually. All data traffic is encrypted under standard TLS 1.3 algorithms at rest and in transit." },
-    { id: "d-2", section: "2. SLA & High Uptime Availability", content: "To satisfied TEC-002 SLAs, our target deployments operate on redundant, hot-swappable clusters verified with 99.99% availability bounds." },
-    { id: "d-3", section: "3. Pricing Commitments", content: "We offer customized enterprise subscription packages detailed inside our pricing appendix. Dedicated customer support is budgeted within the baseline fees." }
-  ]);
+  const [proposalDrafts, setProposalDrafts] = useState([]);
   const [activeDraftIdx, setActiveDraftIdx] = useState(0);
   const [editedDraftValue, setEditedDraftValue] = useState("");
 
@@ -69,36 +52,200 @@ export default function DashboardPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isMatching, setIsMatching] = useState(false);
   const [isDrafting, setIsDrafting] = useState(false);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [isPredicting, setIsPredicting] = useState(false);
   const [alert, setAlert] = useState(null);
+
+  const mapWorkspace = (workspace) => ({
+    id: workspace.id,
+    title: workspace.title,
+    status: workspace.status || "analyzing",
+  });
+
+  const inferWorkspaceTitle = (text) => {
+    const firstUsefulLine = String(text || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 8);
+    return (firstUsefulLine || `RFP Workspace - ${new Date().toLocaleDateString()}`).slice(0, 80);
+  };
+
+  const loadWorkspaces = async () => {
+    try {
+      const response = await fetch("/api/workspaces");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Unable to load workspaces");
+      const loaded = (data.workspaces || []).map(mapWorkspace);
+      setWorkspaces(loaded);
+      setSelectedWorkspaceId((current) => current || loaded[0]?.id || null);
+      setWorkspaceMode(data.mode || "dataset");
+    } catch (err) {
+      console.warn("Workspace load failed:", err);
+      setWorkspaceMode("sample_mode");
+      setWorkspaces([]);
+      setSelectedWorkspaceId(null);
+    }
+  };
+
+  const createWorkspace = async ({ title, rawText = "", status = "analyzing" }) => {
+    const response = await fetch("/api/workspaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, rawText, status }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.workspace?.id) {
+      throw new Error(data.error || "Unable to create workspace");
+    }
+    const workspace = mapWorkspace(data.workspace);
+    setWorkspaces((current) => [workspace, ...current.filter((item) => item.id !== workspace.id)]);
+    setSelectedWorkspaceId(workspace.id);
+    setWorkspaceMode(data.mode || "dataset");
+    return workspace;
+  };
+
+  useEffect(() => {
+    loadWorkspaces();
+  }, []);
 
   // Sync draft edit input
   useEffect(() => {
     if (proposalDrafts[activeDraftIdx]) {
       setEditedDraftValue(proposalDrafts[activeDraftIdx].content);
+    } else {
+      setEditedDraftValue("");
     }
   }, [activeDraftIdx, proposalDrafts]);
 
+  const mapDraft = (draft) => ({
+    id: draft.id,
+    section: draft.section_title,
+    content: draft.content,
+    status: draft.status || "ai_generated",
+  });
+
+  const loadDrafts = async (workspaceId = selectedWorkspaceId) => {
+    if (!workspaceId) return;
+    const response = await fetch(`/api/rfp/draft?workspaceId=${encodeURIComponent(workspaceId)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Unable to load proposal drafts.");
+    const drafts = (data.drafts || []).map(mapDraft);
+    setProposalDrafts(drafts);
+    setActiveDraftIdx(0);
+  };
+
+  useEffect(() => {
+    if (selectedWorkspaceId && activeTab === "draft") {
+      loadDrafts(selectedWorkspaceId).catch((err) => {
+        console.warn("Draft load failed:", err);
+      });
+    }
+  }, [selectedWorkspaceId, activeTab]);
+
   // Handle draft revisions
-  const handleUpdateDraft = () => {
-    const updated = [...proposalDrafts];
-    updated[activeDraftIdx].content = editedDraftValue;
-    setProposalDrafts(updated);
-    setAlert({ type: "success", text: "Successfully saved draft section response text." });
-    setTimeout(() => setAlert(null), 2000);
+  const handleUpdateDraft = async (status = "edited") => {
+    const activeDraft = proposalDrafts[activeDraftIdx];
+    if (!activeDraft) {
+      setAlert({ type: "error", text: "Generate a proposal draft before saving edits." });
+      return;
+    }
+
+    setIsSavingDraft(true);
+    try {
+      const response = await fetch("/api/rfp/draft", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          draftId: activeDraft.id,
+          content: editedDraftValue,
+          status,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Unable to save draft.");
+
+      const savedDraft = mapDraft(data.draft);
+      setProposalDrafts((current) => current.map((draft) =>
+        draft.id === savedDraft.id ? savedDraft : draft
+      ));
+      setAlert({
+        type: "success",
+        text: status === "approved" ? "Draft section approved and saved to Supabase." : "Draft edits saved to Supabase.",
+      });
+      setTimeout(() => setAlert(null), 2000);
+    } catch (err) {
+      setAlert({ type: "error", text: `Draft save failed: ${err.message}` });
+    } finally {
+      setIsSavingDraft(false);
+    }
   };
 
   const handleApproveDraft = () => {
-    setAlert({ type: "success", text: `Approved Section "${proposalDrafts[activeDraftIdx]?.section}" successfully for submission!` });
-    setTimeout(() => setAlert(null), 2000);
+    handleUpdateDraft("approved");
   };
 
-  const handleExportPDF = () => {
-    setAlert({ type: "success", text: "Generating compliant proposal PDF document payload..." });
-    setTimeout(() => {
-      setAlert({ type: "success", text: "Saved Proposal PDF successfully! Downloaded to local workstation." });
-      setTimeout(() => setAlert(null), 2000);
-    }, 1500);
+  const handleGenerateDrafts = async () => {
+    if (!selectedWorkspaceId) {
+      setAlert({ type: "error", text: "Analyze an RFP first so a Supabase workspace exists." });
+      return;
+    }
+
+    setIsDrafting(true);
+    setAlert(null);
+    try {
+      const response = await fetch("/api/rfp/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId: selectedWorkspaceId }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Unable to generate proposal draft.");
+
+      const drafts = (data.drafts || []).map(mapDraft);
+      setProposalDrafts(drafts);
+      setActiveDraftIdx(0);
+      setAlert({ type: "success", text: `Generated ${drafts.length} proposal draft section(s) from workspace evidence.` });
+    } catch (err) {
+      setAlert({ type: "error", text: `Draft generation failed: ${err.message}` });
+    } finally {
+      setIsDrafting(false);
+    }
+  };
+
+  const handleExportProposal = async () => {
+    if (!selectedWorkspaceId) {
+      setAlert({ type: "error", text: "Analyze an RFP before exporting a proposal." });
+      return;
+    }
+
+    setIsExporting(true);
+    setAlert({ type: "success", text: "Preparing DOCX proposal export..." });
+    try {
+      const response = await fetch(`/api/rfp/export?workspaceId=${encodeURIComponent(selectedWorkspaceId)}`);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Export failed.");
+      }
+
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get("Content-Disposition") || "";
+      const fileName = contentDisposition.match(/filename="([^"]+)"/)?.[1] || "bidengine-proposal.docx";
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setAlert({ type: "success", text: "DOCX proposal export downloaded." });
+      setTimeout(() => setAlert(null), 2500);
+    } catch (err) {
+      setAlert({ type: "error", text: `Export failed: ${err.message}` });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   // Analyze RFP API dispatcher (Step 1)
@@ -108,11 +255,20 @@ export default function DashboardPage() {
     setAlert(null);
 
     try {
-      // Simulate/Trigger live Backend analyze endpoint
+      const workspace = await createWorkspace({
+        title: inferWorkspaceTitle(text),
+        rawText: text,
+        status: "analyzing",
+      });
+
       const response = await fetch("/api/rfp/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rawText: text, workspaceId: selectedWorkspaceId }),
+        body: JSON.stringify({
+          rawText: text,
+          workspaceId: workspace.id,
+          bidTitle: workspace.title,
+        }),
       });
 
       const data = await response.json();
@@ -121,7 +277,7 @@ export default function DashboardPage() {
       if (data.requirements && data.requirements.length > 0) {
         // Map types database columns into mock state
         const parsedReqs = data.requirements.map((item, idx) => ({
-          id: `REQ-${String(idx + 1).padStart(3, "0")}`,
+          id: item.id || `REQ-${String(idx + 1).padStart(3, "0")}`,
           title: item.requirement_text?.slice(0, 40) || "Extracted Criteria",
           category: item.requirement_type === "mandatory" ? "Security" : "Technical",
           severity: item.requirement_type === "mandatory" ? "Critical" : "Important",
@@ -130,20 +286,25 @@ export default function DashboardPage() {
         }));
         setRequirements(parsedReqs);
         setSelectedRequirement(parsedReqs[0]);
+        setProposalDrafts([]);
+        setActiveDraftIdx(0);
+        setEditedDraftValue("");
       }
       
-      setAlert({ type: "success", text: "Requirements extracted successfully by Groq AI procurement analyst!" });
+      setWorkspaces((current) => current.map((item) =>
+        item.id === workspace.id ? { ...item, status: "draft_ready" } : item
+      ));
+      setAlert({ type: "success", text: "Created Supabase workspace and extracted requirements successfully." });
       setTimeout(() => {
         setActiveTab("requirements");
         setAlert(null);
       }, 1500);
     } catch (err) {
-      console.warn("Direct API issue, using fallback sandbox pipeline", err);
-      // Run reliable sandbox parser fallback to show rich UI data instantly
-      setTimeout(() => {
-        setAlert({ type: "success", text: "RFP Extracted! Isolated 4 key requirement parameters successfully." });
-        setActiveTab("requirements");
-      }, 1000);
+      console.warn("Workspace-backed analysis failed:", err);
+      setAlert({
+        type: "error",
+        text: `Dataset-backed workspace flow failed: ${err.message}. Check Supabase schema/env, then retry.`
+      });
     } finally {
       setIsAnalyzing(false);
     }
@@ -155,6 +316,10 @@ export default function DashboardPage() {
     setAlert(null);
 
     try {
+      if (!selectedWorkspaceId) {
+        throw new Error("Create or analyze an RFP workspace before running compliance matching.");
+      }
+
       const response = await fetch("/api/rfp/match", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -208,6 +373,10 @@ export default function DashboardPage() {
     setAlert(null);
 
     try {
+      if (!selectedWorkspaceId) {
+        throw new Error("Create or analyze an RFP workspace before calculating win score.");
+      }
+
       const response = await fetch("/api/rfp/score", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -287,9 +456,9 @@ export default function DashboardPage() {
                 onClick={() => {
                   const newTitle = prompt("Enter new workspace title:");
                   if (newTitle) {
-                    const nextId = `ws-${workspaces.length + 1}`;
-                    setWorkspaces([...workspaces, { id: nextId, title: newTitle, status: "Active" }]);
-                    setSelectedWorkspaceId(nextId);
+                    createWorkspace({ title: newTitle, status: "analyzing" }).catch((err) => {
+                      setAlert({ type: "error", text: `Could not create workspace: ${err.message}` });
+                    });
                   }
                 }}
                 className="p-1 bg-purple-900/30 border border-purple-900/60 hover:border-purple-500 rounded text-purple-300 transition"
@@ -317,12 +486,23 @@ export default function DashboardPage() {
                   </div>
                 </button>
               ))}
+              {workspaces.length === 0 && (
+                <div className="text-xs text-slate-500 bg-[#0a0a0f]/40 border border-purple-950/10 rounded-lg p-3">
+                  {workspaceMode === "loading"
+                    ? "Loading Supabase workspaces..."
+                    : "No workspaces yet. Upload or load an RFP to create one."}
+                </div>
+              )}
             </div>
           </div>
 
           <div className="bg-[#1a1a2e] p-4 rounded-xl border border-purple-950/40 space-y-2 text-center text-xs text-slate-500">
             <FolderLock className="h-5 w-5 text-purple-400/80 mx-auto" />
-            <p>Database synchronization matches live Supabase Admin tables.</p>
+            <p>
+              {workspaceMode === "sample_mode"
+                ? "Sample mode: database unavailable."
+                : "Database synchronization matches live Supabase Admin tables."}
+            </p>
           </div>
         </aside>
 
@@ -516,18 +696,51 @@ export default function DashboardPage() {
                     AI Proposal Section Writer
                   </h2>
                   <p className="text-slate-400 text-xs mt-1">
-                    Modify responses synthesized by Llama-3.3-70b-versatile, approve sections, and export PDF deliverables.
+                    Generate dataset-backed proposal sections, edit them inline, approve final copy, and export the full response package.
                   </p>
                 </div>
 
-                <button
-                  onClick={handleExportPDF}
-                  className="px-4 py-2 bg-purple-950 hover:bg-purple-900 border border-purple-800 text-purple-300 font-semibold text-xs rounded-lg transition"
-                >
-                  Export to PDF
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleGenerateDrafts}
+                    disabled={isDrafting || !selectedWorkspaceId}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white disabled:text-slate-500 font-semibold text-xs rounded-lg transition flex items-center gap-2"
+                  >
+                    {isDrafting ? <Loader className="h-3.5 w-3.5 animate-spin" /> : <Cpu className="h-3.5 w-3.5" />}
+                    <span>{isDrafting ? "Generating..." : "Generate Draft"}</span>
+                  </button>
+                  <button
+                    onClick={handleExportProposal}
+                    disabled={isExporting || !selectedWorkspaceId}
+                    className="px-4 py-2 bg-purple-950 hover:bg-purple-900 disabled:bg-slate-800 border border-purple-800 text-purple-300 disabled:text-slate-500 font-semibold text-xs rounded-lg transition"
+                  >
+                    {isExporting ? "Exporting..." : "Export DOCX"}
+                  </button>
+                </div>
               </div>
 
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-[#0a0a0f]/40 border border-purple-950/15 rounded-xl p-3">
+                <div className="text-xs text-slate-400">
+                  {proposalDrafts.length > 0
+                    ? `${proposalDrafts.length} AI-generated section(s) loaded from Supabase.`
+                    : "Generate proposal sections after extraction and compliance matching."}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => loadDrafts().catch((err) => setAlert({ type: "error", text: err.message }))}
+                    disabled={!selectedWorkspaceId}
+                    className="px-4 py-2 bg-[#1a1a2e] hover:bg-[#23233a] disabled:bg-slate-800 border border-purple-950/40 text-purple-300 disabled:text-slate-500 font-semibold text-xs rounded-lg transition"
+                  >
+                    Refresh Drafts
+                  </button>
+                </div>
+              </div>
+
+              {proposalDrafts.length === 0 ? (
+                <div className="bg-[#0a0a0f]/40 border border-purple-950/15 rounded-xl p-10 text-center text-sm text-slate-400">
+                  No proposal sections generated yet. Run extraction and compliance matching, then click Generate Draft.
+                </div>
+              ) : (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {/* Left: Sections layout list */}
                 <div className="space-y-2 border-r border-purple-950/20 pr-0 md:pr-4 flex flex-row md:flex-col overflow-x-auto md:overflow-x-visible pb-2 md:pb-0 gap-2 md:gap-0">
@@ -541,7 +754,8 @@ export default function DashboardPage() {
                           : "bg-[#0a0a0f]/40 text-slate-400 border-transparent hover:bg-purple-950/10 hover:text-slate-200"
                       }`}
                     >
-                      {dr.section}
+                      <span className="block truncate">{dr.section}</span>
+                      <span className="block text-[10px] text-slate-500 font-mono mt-1 uppercase">{dr.status}</span>
                     </button>
                   ))}
                 </div>
@@ -551,10 +765,10 @@ export default function DashboardPage() {
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
                       <span className="text-xs font-mono font-bold text-purple-300">
-                        active section content editor
+                        Active section content editor
                       </span>
                       <span className="text-[10px] bg-purple-950/30 text-purple-450 border border-purple-905/20 px-2 py-0.5 rounded font-mono">
-                        Status: AI Draft Prepared
+                        Status: {proposalDrafts[activeDraftIdx]?.status || "AI Draft Prepared"}
                       </span>
                     </div>
 
@@ -567,21 +781,24 @@ export default function DashboardPage() {
 
                   <div className="flex gap-2 justify-end">
                     <button
-                      onClick={handleUpdateDraft}
-                      className="px-4 py-2 bg-purple-950 border border-purple-900 hover:bg-purple-920 text-purple-300 font-semibold text-xs rounded-lg transition flex items-center gap-1.5 cursor-pointer"
-                    >
+                      onClick={() => handleUpdateDraft("edited")}
+                      disabled={isSavingDraft}
+                      className="px-4 py-2 bg-purple-950 border border-purple-900 hover:bg-purple-920 disabled:bg-slate-800 text-purple-300 disabled:text-slate-500 font-semibold text-xs rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                      >
                       <Edit className="h-3 w-3" />
-                      <span>Edit Response</span>
+                      <span>{isSavingDraft ? "Saving..." : "Save Edits"}</span>
                     </button>
                     <button
                       onClick={handleApproveDraft}
-                      className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs rounded-lg transition cursor-pointer"
+                      disabled={isSavingDraft}
+                      className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white disabled:text-slate-500 font-semibold text-xs rounded-lg transition cursor-pointer"
                     >
                       Approve Section
                     </button>
                   </div>
                 </div>
               </div>
+              )}
             </div>
           )}
 

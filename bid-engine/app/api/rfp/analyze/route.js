@@ -2,30 +2,12 @@ import { NextResponse } from "next/server";
 import { analyzeWithGroq } from "../../../../lib/groqClient";
 import { getSupabaseAdmin } from "../../../../lib/supabaseClient";
 import { loadHackathonDataset } from "../../../../lib/datasetLoader";
+import { extractEntitiesFromText, mapCriteriaToTaxonomy } from "../../../../lib/datasetAnalysis";
 
-const localExtract = (rawText) => {
-  const lines = String(rawText || "")
-    .split(/\r?\n/)
-    .map((line) => line.replace(/^[-*\d.)\s]+/, "").trim())
-    .filter(Boolean);
+const isUuid = (value) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
 
-  const mandatory = lines.filter((line) => /\b(must|shall|required|mandatory|compliance|certification|sla|encryption)\b/i.test(line)).slice(0, 8);
-  const questions = lines.filter((line) => /\?|question\s+[a-z0-9]/i.test(line)).slice(0, 8);
-  const evaluation = lines.filter((line) => /\b(weight|score|criteria|evaluation|technical|pricing|commercial)\b/i.test(line)).slice(0, 8);
-  const deadline = String(rawText).match(/\b(?:deadline|submission).*?(\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2})/i)?.[1] || "";
-  const budget = String(rawText).match(/\b(?:budget|estimate|value|cost).*?(PKR|USD|\$)?\s?[\d,.]+\s?[MK]?/i)?.[0] || "";
-
-  return {
-    mandatory_requirements: mandatory.length ? mandatory : lines.slice(0, 4),
-    evaluation_criteria: evaluation,
-    submission_deadline: deadline,
-    budget_range: budget,
-    question_sections: questions,
-    compliance_clauses: mandatory.filter((line) => /certification|compliance|security|audit|iso|soc/i.test(line)),
-  };
-};
-
-const toRequirementRows = (extractedData, workspaceId = null) => {
+const toRequirementRows = (extractedData, workspaceId = null, taxonomyMappings = [], entities = {}) => {
   const rowsToInsert = [];
   const addRow = (text, type, value) => {
     const cleanText = typeof text === "string" ? text.trim() : JSON.stringify(text);
@@ -41,10 +23,22 @@ const toRequirementRows = (extractedData, workspaceId = null) => {
 
   (extractedData.mandatory_requirements || []).forEach((item) => addRow(item, "mandatory", "Mandatory Core"));
   (extractedData.compliance_clauses || []).forEach((item) => addRow(item, "mandatory", "Compliance Clause"));
-  (extractedData.evaluation_criteria || []).forEach((item) => addRow(item, "evaluation", "Evaluation Metric"));
+  taxonomyMappings.forEach((item) => {
+    addRow(
+      `${item.source_text} [Mapped Taxonomy: ${item.criteria_name}; Sector: ${item.sector}; Weight: ${item.weight_percentage ?? "N/A"}%]`,
+      "evaluation",
+      `Taxonomy: ${item.criteria_name} | ${item.sector} | ${item.weight_percentage ?? "N/A"}%`
+    );
+  });
+  if (taxonomyMappings.length === 0) {
+    (extractedData.evaluation_criteria || []).forEach((item) => addRow(item, "evaluation", "Evaluation Metric"));
+  }
   (extractedData.question_sections || []).forEach((item) => addRow(item, "mandatory", "Question Section"));
   if (extractedData.submission_deadline) addRow(`Submission Deadline Target: ${extractedData.submission_deadline}`, "deadline", String(extractedData.submission_deadline));
   if (extractedData.budget_range) addRow(`Project Budget Range: ${extractedData.budget_range}`, "evaluation", String(extractedData.budget_range));
+  (entities.deadlines || []).forEach((item) => addRow(`NER Deadline Detected: ${item}`, "deadline", item));
+  (entities.budgets || []).forEach((item) => addRow(`NER Budget Detected: ${item}`, "evaluation", item));
+  (entities.mandatory_clauses || []).forEach((item) => addRow(item, "mandatory", "NER Mandatory Clause"));
   return rowsToInsert;
 };
 
@@ -59,31 +53,16 @@ export async function POST(request) {
       );
     }
 
-    const isTrialWorkspace = givenWorkspaceId && String(givenWorkspaceId).startsWith("ws-trial");
-    if (isTrialWorkspace) {
-      const dataset = loadHackathonDataset();
-      const extracted = localExtract(rawText);
-      const requirements = toRequirementRows(extracted).map((row, index) => ({
-        id: `REQ-${String(index + 1).padStart(3, "0")}`,
-        ...row,
-      }));
-
-      return NextResponse.json({
-        success: true,
-        mode: "sample_mode",
-        workspaceId: givenWorkspaceId,
-        extracted,
-        requirements,
-        dataset_counts: {
-          capability_library: dataset.capabilityLibrary.length,
-          bid_history: dataset.bidHistory.length,
-          evaluation_criteria_taxonomy: dataset.evaluationCriteria.length,
-        },
-      });
+    if (givenWorkspaceId && !isUuid(givenWorkspaceId)) {
+      return NextResponse.json(
+        { error: "workspaceId must be a valid Supabase UUID." },
+        { status: 400 }
+      );
     }
 
     const supabase = getSupabaseAdmin();
     let workspaceId = givenWorkspaceId;
+    const entities = extractEntitiesFromText(rawText);
 
     // 1. Create a workspace or find the existing one if not provided
     if (!workspaceId) {
@@ -119,9 +98,17 @@ RFP TEXT:
 ${rawText.slice(0, 18000)}`;
 
     const extractedData = await analyzeWithGroq(userPrompt, systemPrompt);
+    const { data: dbTaxonomy, error: taxonomyError } = await supabase
+      .from("evaluation_criteria_taxonomy")
+      .select("*");
+    const fallbackTaxonomy = loadHackathonDataset().evaluationCriteria;
+    const taxonomy = !taxonomyError && dbTaxonomy?.length ? dbTaxonomy : fallbackTaxonomy;
+    const taxonomyMappings = mapCriteriaToTaxonomy(extractedData.evaluation_criteria || [], taxonomy);
+    extractedData.extracted_entities = entities;
+    extractedData.taxonomy_mappings = taxonomyMappings;
 
     // 3. Prepare requirements structure to populate database
-    const rowsToInsert = toRequirementRows(extractedData, workspaceId);
+    const rowsToInsert = toRequirementRows(extractedData, workspaceId, taxonomyMappings, entities);
 
     // 4. Save rows to Supabase database
     if (rowsToInsert.length > 0) {

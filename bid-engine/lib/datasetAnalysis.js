@@ -13,6 +13,71 @@ export const tokenize = (text) =>
 
 const unique = (values) => [...new Set(values)];
 
+const numberFromText = (value) => {
+  const match = String(value || "").replace(/,/g, "").match(/\d+(\.\d+)?/);
+  return match ? Number(match[0]) : null;
+};
+
+export const parseBudgetAmount = (value) => {
+  const text = String(value || "").toLowerCase().replace(/,/g, "");
+  const amount = numberFromText(text);
+  if (!amount) return null;
+  if (/\b(bn|billion)\b/.test(text)) return amount * 1000000000;
+  if (/\b(m|mn|million)\b/.test(text)) return amount * 1000000;
+  if (/\b(k|thousand)\b/.test(text)) return amount * 1000;
+  return amount;
+};
+
+export function extractEntitiesFromText(rawText = "") {
+  const text = String(rawText || "");
+  const dateMatches = [
+    ...text.matchAll(/\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4})\b/gi),
+  ].map((match) => match[0]);
+
+  const budgetMatches = [
+    ...text.matchAll(/\b(?:pkr|usd|\$|rs\.?)\s?\d[\d,]*(?:\.\d+)?\s?(?:k|m|mn|million|bn|billion)?\b/gi),
+    ...text.matchAll(/\b\d[\d,]*(?:\.\d+)?\s?(?:pkr|usd|dollars?|rupees?|million|mn|bn|billion)\b/gi),
+  ].map((match) => match[0]);
+
+  const mandatoryClauses = text
+    .split(/\r?\n|(?<=\.)\s+/)
+    .map((line) => line.trim())
+    .filter((line) => /\b(shall|must|required|mandatory|compliant|certified|submit|deadline)\b/i.test(line))
+    .slice(0, 12);
+
+  return {
+    deadlines: unique(dateMatches).slice(0, 8),
+    budgets: unique(budgetMatches).slice(0, 8),
+    mandatory_clauses: unique(mandatoryClauses).slice(0, 12),
+  };
+}
+
+export function mapCriteriaToTaxonomy(criteria = [], taxonomy = []) {
+  return criteria.map((criterion) => {
+    const criterionText = typeof criterion === "string"
+      ? criterion
+      : `${criterion.criteria_name || ""} ${criterion.description || ""} ${criterion.weight_percentage || ""}`;
+    const criterionTokens = new Set(tokenize(criterionText));
+    const best = taxonomy
+      .map((item) => {
+        const taxonomyText = `${item.criteria_name || ""} ${item.sector || ""} ${item.description || ""}`;
+        const taxTokens = tokenize(taxonomyText);
+        const overlap = taxTokens.filter((token) => criterionTokens.has(token)).length;
+        return { item, score: overlap };
+      })
+      .sort((a, b) => b.score - a.score)[0];
+
+    return {
+      source_text: criterionText,
+      criteria_name: best?.score ? best.item.criteria_name : criterionText,
+      sector: best?.score ? best.item.sector : "General",
+      weight_percentage: numberFromText(criterionText) || best?.item?.weight_percentage || null,
+      description: best?.score ? best.item.description : "Extracted evaluation criterion from RFP.",
+      match_score: best?.score || 0,
+    };
+  });
+}
+
 const containsPhraseBonus = (requirementText, capabilityText) => {
   const req = requirementText.toLowerCase();
   const cap = capabilityText.toLowerCase();
@@ -23,9 +88,15 @@ const containsPhraseBonus = (requirementText, capabilityText) => {
   return bonus;
 };
 
-export function matchRequirementToCapabilities(requirement, capabilities = []) {
+export function matchRequirementToCapabilities(requirement, capabilities = [], options = {}) {
   const requirementText = requirement.requirement_text || requirement.description || requirement.title || "";
-  const reqTokens = unique(tokenize(requirementText));
+  const entityContext = [
+    ...(options.entities?.deadlines || []),
+    ...(options.entities?.budgets || []),
+    ...(options.entities?.mandatory_clauses || []),
+    options.taxonomyHint || "",
+  ].join(" ");
+  const reqTokens = unique(tokenize(`${requirementText} ${entityContext}`));
 
   const scored = capabilities.map((capability) => {
     const capabilityText = [
@@ -62,7 +133,7 @@ export function matchRequirementToCapabilities(requirement, capabilities = []) {
     confidence: best?.confidence || 0,
     evidence,
     reasoning: best
-      ? `Matched ${best.matchedTerms.length} key terms against ${best.capability.domain || "capability"} evidence and certification ${best.capability.certification || "N/A"}.`
+      ? `Matched ${best.matchedTerms.length} key terms against ${best.capability.domain || "capability"} evidence and certification ${best.capability.certification || "N/A"}. Entities considered: ${(options.entities?.budgets || []).concat(options.entities?.deadlines || []).slice(0, 3).join(", ") || "none"}.`
       : "No capability record could be compared.",
     capability: best?.capability || null,
   };
@@ -110,19 +181,45 @@ export function calculateWinScore({ requirements = [], capabilities = [], bidHis
     ? Math.round(historyBase.reduce((sum, bid) => sum + Number(bid.score_percent || 0), 0) / historyBase.length)
     : 65;
 
-  const budgetNumbers = [rawText, ...requirements.map((req) => req.extracted_value || req.requirement_text || "")]
+  const budgetCandidates = [rawText, ...requirements.map((req) => req.extracted_value || req.requirement_text || "")]
     .join(" ")
-    .match(/\d+(\.\d+)?/g)
-    ?.map(Number) || [];
-  const budgetAlignment = budgetNumbers.length ? Math.min(100, Math.max(45, 100 - Math.min(55, budgetNumbers[0] / 10))) : 75;
+    .match(/(?:pkr|usd|\$|rs\.?)?\s?\d[\d,]*(?:\.\d+)?\s?(?:k|m|mn|million|bn|billion)?/gi) || [];
+  const requestedBudget = budgetCandidates.map(parseBudgetAmount).find(Boolean);
+  const historicalBudgets = historyBase.map((bid) => parseBudgetAmount(bid.budget)).filter(Boolean);
+  const avgHistoricalBudget = historicalBudgets.length
+    ? historicalBudgets.reduce((sum, value) => sum + value, 0) / historicalBudgets.length
+    : null;
+  const explicitBudgetAlignment = historyBase.length
+    ? Math.round(historyBase.reduce((sum, bid) => sum + Number(bid.budget_alignment_score || bid.budget_alignment || 0), 0) / historyBase.length)
+    : 0;
+  const budgetAlignment = requestedBudget && avgHistoricalBudget
+    ? Math.max(35, Math.min(100, Math.round(100 - Math.min(65, Math.abs(requestedBudget - avgHistoricalBudget) / avgHistoricalBudget * 100))))
+    : explicitBudgetAlignment || 75;
+
+  const technicalHistory = historyBase.length
+    ? Math.round(historyBase.reduce((sum, bid) => sum + Number(bid.technical_score || bid.score_percent || 0), 0) / historyBase.length)
+    : avgHistoryScore;
+  const commercialHistory = historyBase.length
+    ? Math.round(historyBase.reduce((sum, bid) => sum + Number(bid.commercial_score || bid.budget_alignment_score || budgetAlignment || 0), 0) / historyBase.length)
+    : budgetAlignment;
+  const riskPenalty = historyBase.length
+    ? Math.round(historyBase.reduce((sum, bid) => sum + Number(bid.risk_score || bid.gaps_found || 0), 0) / historyBase.length)
+    : 10;
+  const strategicFit = historyBase.length
+    ? Math.round(historyBase.reduce((sum, bid) => sum + Number(bid.strategic_fit_score || bid.relationship_score || 65), 0) / historyBase.length)
+    : 65;
 
   const similarExperienceScore = Math.min(100, Math.round((capabilities.filter((cap) => cap.domain === sector).length / Math.max(1, capabilities.length)) * 220));
   const totalScore = Math.round(
-    capabilityMatch * 0.28 +
-    complianceScore * 0.24 +
-    sectorWinRate * 0.18 +
+    sectorWinRate * 0.2 +
     avgHistoryScore * 0.18 +
-    budgetAlignment * 0.12
+    capabilityMatch * 0.22 +
+    complianceScore * 0.18 +
+    budgetAlignment * 0.12 +
+    technicalHistory * 0.05 +
+    commercialHistory * 0.03 +
+    strategicFit * 0.04 -
+    Math.min(12, riskPenalty * 0.35)
   );
 
   return {
@@ -134,6 +231,10 @@ export function calculateWinScore({ requirements = [], capabilities = [], bidHis
     sector_win_rate: sectorWinRate,
     similar_experience_score: similarExperienceScore,
     evaluation_history_score: avgHistoryScore,
+    technical_history_score: technicalHistory,
+    commercial_history_score: commercialHistory,
+    strategic_fit_score: strategicFit,
+    risk_penalty_score: Math.min(100, riskPenalty),
     decision: totalScore >= 70 ? "GO" : "NO-GO",
   };
 }

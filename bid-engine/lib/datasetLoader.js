@@ -1,7 +1,10 @@
 import fs from "fs";
 import path from "path";
-import * as XLSX from "xlsx";
-import { CAPABILITY_LIBRARY, BID_HISTORY, EVALUATION_CRITERIA_TAXONOMY } from "./sampleData";
+import { createRequire } from "module";
+import { CAPABILITY_LIBRARY, BID_HISTORY, EVALUATION_CRITERIA_TAXONOMY } from "./sampleData.js";
+
+const require = createRequire(import.meta.url);
+const XLSX = require("xlsx");
 
 export const DEFAULT_DATASET_PATH = path.resolve(
   process.cwd(),
@@ -30,6 +33,13 @@ const toIsoDate = (value) => {
   }
   const parsed = new Date(text);
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+};
+
+const pick = (row, keys, fallback = "") => {
+  for (const key of keys) {
+    if (clean(row[key])) return row[key];
+  }
+  return fallback;
 };
 
 const findHeaderIndex = (rows, requiredLabels) =>
@@ -96,6 +106,12 @@ export function loadHackathonDataset(filePath = process.env.DATASET_XLSX_PATH ||
         gaps_found: null,
         bid_manager: "Sample Manager",
         submission_date: null,
+        competitor_presence: item.outcome === "win" ? "Medium" : "High",
+        incumbent_vendor: item.outcome === "win" ? "No" : "Unknown",
+        technical_score: item.match_score,
+        commercial_score: item.budget_alignment,
+        risk_score: item.outcome === "win" ? 18 : 42,
+        strategic_fit_score: Math.round((item.match_score + item.compliance_score) / 2),
       })),
       evaluationCriteria: EVALUATION_CRITERIA_TAXONOMY,
     };
@@ -105,6 +121,7 @@ export function loadHackathonDataset(filePath = process.env.DATASET_XLSX_PATH ||
   const sheetNames = Object.keys(sheets);
   const bidSheetName = sheetNames.find((name) => /bid history/i.test(name)) || sheetNames[0];
   const capabilitySheetName = sheetNames.find((name) => /capability/i.test(name)) || sheetNames[1];
+  const criteriaSheetName = sheetNames.find((name) => /evaluation|criteria|taxonomy/i.test(name));
 
   const bidObjects = rowsToObjects(
     sheets[bidSheetName] || [],
@@ -114,6 +131,12 @@ export function loadHackathonDataset(filePath = process.env.DATASET_XLSX_PATH ||
     sheets[capabilitySheetName] || [],
     findHeaderIndex(sheets[capabilitySheetName] || [], ["Cap ID", "Domain", "Project Summary"])
   );
+  const criteriaObjects = criteriaSheetName
+    ? rowsToObjects(
+        sheets[criteriaSheetName] || [],
+        findHeaderIndex(sheets[criteriaSheetName] || [], ["Sector"])
+      )
+    : [];
 
   const capabilityLibrary = capabilityObjects.map((row) => {
     const domain = clean(row.domain) || "General";
@@ -135,20 +158,41 @@ export function loadHackathonDataset(filePath = process.env.DATASET_XLSX_PATH ||
     };
   });
 
-  const bidHistory = bidObjects.map((row) => ({
-    bid_id: clean(row.bid_id),
-    client: clean(row.client),
-    sector: clean(row.sector) || "General",
-    budget: clean(row.budget),
-    score_percent: numberFromText(row.score),
-    outcome: clean(row.outcome).toLowerCase() === "win" ? "win" : "loss",
-    response_time_hrs: numberFromText(row.response_time_hrs),
-    compliance_percent: numberFromText(row.compliance),
-    doc_pages: numberFromText(row.doc_pages),
-    gaps_found: numberFromText(row.gaps_found),
-    bid_manager: clean(row.bid_manager),
-    submission_date: toIsoDate(row.submission_date),
-  })).filter((row) => row.bid_id);
+  const bidHistory = bidObjects.map((row) => {
+    const score = numberFromText(pick(row, ["score", "score_percent", "evaluation_score"]));
+    const compliance = numberFromText(pick(row, ["compliance", "compliance_percent"]));
+    const gaps = numberFromText(row.gaps_found);
+    const outcome = clean(row.outcome).toLowerCase() === "win" ? "win" : "loss";
+    return {
+      bid_id: clean(row.bid_id),
+      client: clean(row.client),
+      sector: clean(row.sector) || "General",
+      budget: clean(row.budget),
+      score_percent: score,
+      outcome,
+      response_time_hrs: numberFromText(row.response_time_hrs),
+      compliance_percent: compliance,
+      doc_pages: numberFromText(row.doc_pages),
+      gaps_found: gaps,
+      bid_manager: clean(row.bid_manager),
+      submission_date: toIsoDate(row.submission_date),
+      competitor_presence: clean(pick(row, ["competitor_presence", "competitors", "competitor"])) || (outcome === "win" ? "Medium" : "High"),
+      incumbent_vendor: clean(pick(row, ["incumbent_vendor", "incumbent"])) || "Unknown",
+      technical_score: numberFromText(pick(row, ["technical_score", "technical_evaluation_score"])) || score,
+      commercial_score: numberFromText(pick(row, ["commercial_score", "commercial_evaluation_score", "budget_alignment_score"])) || Math.max(45, Math.min(95, 100 - (gaps || 3) * 5)),
+      risk_score: numberFromText(pick(row, ["risk_score", "risk_rating"])) || Math.min(100, (gaps || 3) * 8 + (outcome === "loss" ? 18 : 0)),
+      strategic_fit_score: numberFromText(pick(row, ["strategic_fit_score", "strategic_fit", "relationship_score"])) || Math.round(((score || 65) + (compliance || 70)) / 2),
+    };
+  }).filter((row) => row.bid_id);
+
+  const evaluationCriteria = criteriaObjects.length
+    ? criteriaObjects.map((row, index) => ({
+        criteria_name: clean(pick(row, ["criteria_name", "criteria", "evaluation_criteria", "name"])) || `Evaluation Criterion ${index + 1}`,
+        sector: clean(row.sector) || "General",
+        weight_percentage: numberFromText(pick(row, ["weight_percentage", "weight", "weighting"])),
+        description: clean(row.description) || clean(pick(row, ["details", "criteria_description"])) || "Dataset evaluation criterion.",
+      }))
+    : EVALUATION_CRITERIA_TAXONOMY;
 
   return {
     source: "excel",
@@ -160,7 +204,7 @@ export function loadHackathonDataset(filePath = process.env.DATASET_XLSX_PATH ||
     })),
     capabilityLibrary,
     bidHistory,
-    evaluationCriteria: EVALUATION_CRITERIA_TAXONOMY,
+    evaluationCriteria,
   };
 }
 

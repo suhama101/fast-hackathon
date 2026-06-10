@@ -12,8 +12,15 @@ create table if not exists rfp_workspaces (
   user_id uuid references auth.users(id) on delete cascade default auth.uid(),
   title text not null,
   status text not null default 'analyzing', -- 'analyzing', 'draft_ready', 'submitted'
+  raw_text text,
+  file_name text,
+  updated_at timestamptz default timezone('utc'::text, now()) not null,
   created_at timestamptz default timezone('utc'::text, now()) not null
 );
+
+alter table rfp_workspaces add column if not exists raw_text text;
+alter table rfp_workspaces add column if not exists file_name text;
+alter table rfp_workspaces add column if not exists updated_at timestamptz default timezone('utc'::text, now()) not null;
 
 -- Enable Row Level Security (RLS)
 alter table rfp_workspaces enable row level security;
@@ -39,6 +46,10 @@ create table if not exists rfp_requirements (
   match_reasoning text,
   created_at timestamptz default timezone('utc'::text, now()) not null
 );
+
+alter table rfp_requirements add column if not exists matched_evidence text;
+alter table rfp_requirements add column if not exists match_confidence numeric check (match_confidence is null or (match_confidence >= 0 and match_confidence <= 100));
+alter table rfp_requirements add column if not exists match_reasoning text;
 
 -- Enable Row Level Security (RLS)
 alter table rfp_requirements enable row level security;
@@ -93,6 +104,12 @@ create table if not exists capability_library (
   created_at timestamptz default timezone('utc'::text, now()) not null
 );
 
+alter table capability_library add column if not exists external_id text unique;
+alter table capability_library add column if not exists domain text;
+alter table capability_library add column if not exists project_summary text;
+alter table capability_library add column if not exists certification text;
+alter table capability_library add column if not exists duration_months integer;
+
 -- Enable Row Level Security (RLS)
 alter table capability_library enable row level security;
 
@@ -119,8 +136,21 @@ create table if not exists bid_history (
   gaps_found integer,
   bid_manager text,
   submission_date date,
+  competitor_presence text,
+  incumbent_vendor text,
+  technical_score numeric check (technical_score is null or (technical_score >= 0 and technical_score <= 100)),
+  commercial_score numeric check (commercial_score is null or (commercial_score >= 0 and commercial_score <= 100)),
+  risk_score numeric check (risk_score is null or (risk_score >= 0 and risk_score <= 100)),
+  strategic_fit_score numeric check (strategic_fit_score is null or (strategic_fit_score >= 0 and strategic_fit_score <= 100)),
   created_at timestamptz default timezone('utc'::text, now()) not null
 );
+
+alter table bid_history add column if not exists competitor_presence text;
+alter table bid_history add column if not exists incumbent_vendor text;
+alter table bid_history add column if not exists technical_score numeric check (technical_score is null or (technical_score >= 0 and technical_score <= 100));
+alter table bid_history add column if not exists commercial_score numeric check (commercial_score is null or (commercial_score >= 0 and commercial_score <= 100));
+alter table bid_history add column if not exists risk_score numeric check (risk_score is null or (risk_score >= 0 and risk_score <= 100));
+alter table bid_history add column if not exists strategic_fit_score numeric check (strategic_fit_score is null or (strategic_fit_score >= 0 and strategic_fit_score <= 100));
 
 alter table bid_history enable row level security;
 
@@ -204,9 +234,21 @@ create table if not exists win_scores (
   sector_win_rate numeric check (sector_win_rate is null or (sector_win_rate >= 0 and sector_win_rate <= 100)),
   similar_experience_score numeric check (similar_experience_score is null or (similar_experience_score >= 0 and similar_experience_score <= 100)),
   evaluation_history_score numeric check (evaluation_history_score is null or (evaluation_history_score >= 0 and evaluation_history_score <= 100)),
+  technical_history_score numeric check (technical_history_score is null or (technical_history_score >= 0 and technical_history_score <= 100)),
+  commercial_history_score numeric check (commercial_history_score is null or (commercial_history_score >= 0 and commercial_history_score <= 100)),
+  strategic_fit_score numeric check (strategic_fit_score is null or (strategic_fit_score >= 0 and strategic_fit_score <= 100)),
+  risk_penalty_score numeric check (risk_penalty_score is null or (risk_penalty_score >= 0 and risk_penalty_score <= 100)),
   decision text not null check (decision in ('GO', 'NO-GO')),
   created_at timestamptz default timezone('utc'::text, now()) not null
 );
+
+alter table win_scores add column if not exists sector_win_rate numeric check (sector_win_rate is null or (sector_win_rate >= 0 and sector_win_rate <= 100));
+alter table win_scores add column if not exists similar_experience_score numeric check (similar_experience_score is null or (similar_experience_score >= 0 and similar_experience_score <= 100));
+alter table win_scores add column if not exists evaluation_history_score numeric check (evaluation_history_score is null or (evaluation_history_score >= 0 and evaluation_history_score <= 100));
+alter table win_scores add column if not exists technical_history_score numeric check (technical_history_score is null or (technical_history_score >= 0 and technical_history_score <= 100));
+alter table win_scores add column if not exists commercial_history_score numeric check (commercial_history_score is null or (commercial_history_score >= 0 and commercial_history_score <= 100));
+alter table win_scores add column if not exists strategic_fit_score numeric check (strategic_fit_score is null or (strategic_fit_score >= 0 and strategic_fit_score <= 100));
+alter table win_scores add column if not exists risk_penalty_score numeric check (risk_penalty_score is null or (risk_penalty_score >= 0 and risk_penalty_score <= 100));
 
 -- Enable Row Level Security (RLS)
 alter table win_scores enable row level security;
