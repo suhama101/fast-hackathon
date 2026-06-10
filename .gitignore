@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# next.js build and webpack cache (SABSE IMPORTANT)
+.next/
+**/.next/
+**/_next/
+bid-engine/.next/
+
+# production/build directories
+build/
+dist/
+coverage/
+
+# local env secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*
+!.env.example
+
+# misc
+.DS_Store
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.vercel

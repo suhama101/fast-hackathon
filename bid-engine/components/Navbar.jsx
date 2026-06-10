@@ -1,0 +1,127 @@
+"use client";
+
+import React, { useState } from "react";
+import { FileText, Award, ShieldAlert, LogOut, CheckCircle, Menu, X, Cpu } from "lucide-react";
+
+export default function Navbar({ activeTab, setActiveTab, userEmail, onSignOut }) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const menuItems = [
+    { id: "upload", label: "Analyze RFP", icon: FileText },
+    { id: "requirements", label: "Requirements", icon: CheckCircle },
+    { id: "compliance", label: "Compliance & Match", icon: ShieldAlert },
+    { id: "draft", label: "Response Drafts", icon: Cpu },
+    { id: "score", label: "Win Score Predictor", icon: Award },
+  ];
+
+  return (
+    <nav className="bg-slate-900 border-b border-slate-800 sticky top-0 z-50 shadow-lg" id="bid-engine-nav">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16">
+          <div className="flex items-center">
+            <div className="flex-shrink-0 flex items-center space-x-2 text-indigo-400">
+              <Cpu className="h-8 w-8 animate-pulse text-indigo-500" />
+              <span className="font-sans font-extrabold text-xl tracking-tight text-white bg-clip-text">
+                BidEngine<span className="text-indigo-500">.AI</span>
+              </span>
+            </div>
+            
+            {/* Desktop Navigation Links */}
+            <div className="hidden lg:block ml-10">
+              <div className="flex items-center space-x-2">
+                {menuItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => setActiveTab && setActiveTab(item.id)}
+                      className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-all duration-200 outline-none ${
+                        isActive
+                          ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20"
+                          : "text-slate-400 hover:text-white hover:bg-slate-800"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* User Section / Access controls */}
+          <div className="hidden lg:flex items-center space-x-4">
+            {userEmail && (
+              <div className="text-slate-400 text-xs font-mono">
+                Active Bidding: <span className="text-indigo-400">{userEmail}</span>
+              </div>
+            )}
+            {onSignOut ? (
+              <button
+                onClick={onSignOut}
+                className="flex items-center space-x-1 px-3 py-1 bg-slate-850 hover:bg-red-950 hover:text-red-300 rounded text-xs text-slate-400 border border-slate-855 transition"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span>Exit Workspace</span>
+              </button>
+            ) : null}
+          </div>
+
+          {/* Mobile menu button */}
+          <div className="lg:hidden flex items-center">
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="inline-flex items-center justify-center p-2 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 focus:outline-none"
+            >
+              {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile Menu */}
+      {mobileMenuOpen && (
+        <div className="lg:hidden bg-slate-900 border-b border-slate-800 px-2 pt-2 pb-3 space-y-1 sm:px-3">
+          {menuItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setActiveTab && setActiveTab(item.id);
+                  setMobileMenuOpen(false);
+                }}
+                className={`flex items-center space-x-3 w-full px-3 py-3 rounded-md text-base font-medium transition-all ${
+                  isActive
+                    ? "bg-indigo-600 text-white"
+                    : "text-slate-400 hover:text-white hover:bg-slate-800"
+                }`}
+              >
+                <Icon className="h-5 w-5" />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+          
+          {userEmail && (
+            <div className="px-3 py-2 text-slate-500 font-mono text-xs border-t border-slate-800">
+              User: <span className="text-indigo-400">{userEmail}</span>
+            </div>
+          )}
+          {onSignOut && (
+            <button
+              onClick={onSignOut}
+              className="flex items-center space-x-2 w-full px-3 py-3 text-red-400 hover:bg-slate-800 rounded-md text-base"
+            >
+              <LogOut className="h-5 w-5" />
+              <span>Exit Workspace</span>
+            </button>
+          )}
+        </div>
+      )}
+    </nav>
+  );
+}

@@ -1,0 +1,6 @@
+{
+  "name": "BidEngine AI",
+  "description": "An AI-Powered Bid & Proposal Response Engine designed to parse RFPs, match requirements, draft compliant proposals, and predict success win scores.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
