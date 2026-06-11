@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { extractTextFromFile } from "../../../../lib/pdfParser";
+import { requireAuthenticatedUser } from "../../../../lib/requestAuth";
 
 export const runtime = "nodejs";
 
@@ -22,6 +23,9 @@ function looksLikeBinaryData(text = "") {
  */
 export async function POST(request) {
   try {
+    const auth = await requireAuthenticatedUser(request);
+    if (auth.errorResponse) return auth.errorResponse;
+
     const formData = await request.formData();
     const file = formData.get("file");
     const bidTitle = formData.get("title") || "Untitled RFP";
