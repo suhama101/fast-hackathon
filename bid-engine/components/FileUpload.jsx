@@ -75,6 +75,7 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
     setProgress(10);
 
     try {
+      const authToken = typeof window !== "undefined" ? localStorage.getItem("bid_engine_token") : "";
       const formData = new FormData();
       formData.append("file", file);
       formData.append("title", file.name.replace(/\.[^.]+$/, ""));
@@ -82,11 +83,16 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
       const response = await fetch("/api/rfp/upload", {
         method: "POST",
         credentials: "include",
+        headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
         body: formData,
       });
       setProgress(70);
 
-      const data = await response.json().catch(() => ({}));
+      const contentType = response.headers.get("content-type") || "";
+      const data = contentType.includes("application/json")
+        ? await response.json().catch(() => ({}))
+        : { error: await response.text().catch(() => "") };
+
       if (!response.ok) throw new Error(data.error || "Upload parser unavailable.");
 
       const extractedText = data.rawText || "";
@@ -105,7 +111,10 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
       setProgress(0);
       setRfpText("");
       setPreviewText("");
-      setAlertMsg({ type: "error", text: err.message || "Failed to parse the provided document." });
+      setAlertMsg({
+        type: "error",
+        text: err.message || "Failed to parse the provided document."
+      });
     }
   };
 
