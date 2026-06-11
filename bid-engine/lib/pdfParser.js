@@ -1,6 +1,3 @@
-import { PDFParse } from "pdf-parse";
-import mammoth from "mammoth";
-
 const MIN_EXTRACTED_TEXT_LENGTH = 50;
 
 /**
@@ -12,6 +9,7 @@ export async function extractTextFromPDF(buffer) {
   let parser;
 
   try {
+    const { PDFParse } = await import("pdf-parse");
     parser = new PDFParse({ data: buffer });
     const data = await parser.getText();
     return ensureReadableText(data.text, "PDF");
@@ -34,6 +32,8 @@ export async function extractTextFromPDF(buffer) {
  */
 export async function extractTextFromDOCX(buffer) {
   try {
+    const mammothModule = await import("mammoth");
+    const mammoth = mammothModule.default || mammothModule;
     const result = await mammoth.extractRawText({ buffer });
     return ensureReadableText(result.value, "DOCX file");
   } catch (error) {
@@ -89,9 +89,7 @@ export async function extractTextFromFile(buffer, filename = "", fileType = "") 
 
   if (
     ext === "docx" ||
-    ext === "doc" ||
-    mime.includes("officedocument.wordprocessingml.document") ||
-    mime.includes("msword")
+    mime.includes("officedocument.wordprocessingml.document")
   ) {
     return extractTextFromDOCX(buffer);
   }

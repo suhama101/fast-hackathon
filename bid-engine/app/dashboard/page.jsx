@@ -60,6 +60,11 @@ export default function DashboardPage() {
   const [isPredicting, setIsPredicting] = useState(false);
   const [alert, setAlert] = useState(null);
 
+  const getAuthHeaders = (headers = {}) => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("bid_engine_token") : "";
+    return token ? { ...headers, Authorization: `Bearer ${token}` } : headers;
+  };
+
   useEffect(() => {
     const checkAuth = async () => {
       try {
@@ -122,7 +127,9 @@ export default function DashboardPage() {
 
   const loadWorkspaces = async () => {
     try {
-      const response = await fetch("/api/workspaces");
+      const response = await fetch("/api/workspaces", {
+        headers: getAuthHeaders(),
+      });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Unable to load workspaces");
       const loaded = (data.workspaces || []).map(mapWorkspace);
@@ -137,11 +144,11 @@ export default function DashboardPage() {
     }
   };
 
-  const createWorkspace = async ({ title, rawText = "", status = "analyzing" }) => {
+  const createWorkspace = async ({ title, rawText = "", status = "analyzing", fileName = null }) => {
     const response = await fetch("/api/workspaces", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, rawText, status }),
+      headers: getAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ title, rawText, status, fileName }),
     });
     const data = await response.json();
     if (!response.ok || !data.workspace?.id) {
@@ -178,7 +185,9 @@ export default function DashboardPage() {
 
   const loadDrafts = async (workspaceId = selectedWorkspaceId) => {
     if (!workspaceId) return;
-    const response = await fetch(`/api/rfp/draft?workspaceId=${encodeURIComponent(workspaceId)}`);
+    const response = await fetch(`/api/rfp/draft?workspaceId=${encodeURIComponent(workspaceId)}`, {
+      headers: getAuthHeaders(),
+    });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Unable to load proposal drafts.");
     const drafts = (data.drafts || []).map(mapDraft);
@@ -206,7 +215,7 @@ export default function DashboardPage() {
     try {
       const response = await fetch("/api/rfp/draft", {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           draftId: activeDraft.id,
           content: editedDraftValue,
@@ -247,7 +256,7 @@ export default function DashboardPage() {
     try {
       const response = await fetch("/api/rfp/draft", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ workspaceId: selectedWorkspaceId }),
       });
       const data = await response.json();
@@ -273,7 +282,9 @@ export default function DashboardPage() {
     setIsExporting(true);
     setAlert({ type: "success", text: "Preparing DOCX proposal export..." });
     try {
-      const response = await fetch(`/api/rfp/export?workspaceId=${encodeURIComponent(selectedWorkspaceId)}`);
+      const response = await fetch(`/api/rfp/export?workspaceId=${encodeURIComponent(selectedWorkspaceId)}`, {
+        headers: getAuthHeaders(),
+      });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         throw new Error(data.error || "Export failed.");
@@ -300,21 +311,32 @@ export default function DashboardPage() {
   };
 
   // Analyze RFP API dispatcher (Step 1)
-  const executeRfpAnalysis = async (text) => {
+  const executeRfpAnalysis = async (text, uploadMeta = {}) => {
     setIsAnalyzing(true);
     setRfpText(text);
     setAlert(null);
 
     try {
-      const workspace = await createWorkspace({
-        title: inferWorkspaceTitle(text),
-        rawText: text,
-        status: "analyzing",
-      });
+      let workspace = uploadMeta.workspace?.id
+        ? mapWorkspace(uploadMeta.workspace)
+        : null;
+
+      if (workspace) {
+        setWorkspaces((current) => [workspace, ...current.filter((item) => item.id !== workspace.id)]);
+        setSelectedWorkspaceId(workspace.id);
+        setWorkspaceMode("dataset");
+      } else {
+        workspace = await createWorkspace({
+          title: inferWorkspaceTitle(text),
+          rawText: text,
+          status: "analyzing",
+          fileName: uploadMeta.fileName || null,
+        });
+      }
 
       const response = await fetch("/api/rfp/analyze", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           rawText: text,
           workspaceId: workspace.id,
@@ -373,7 +395,7 @@ export default function DashboardPage() {
 
       const response = await fetch("/api/rfp/match", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ workspaceId: selectedWorkspaceId, requirements }),
       });
       const data = await response.json();
@@ -430,7 +452,7 @@ export default function DashboardPage() {
 
       const response = await fetch("/api/rfp/score", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ workspaceId: selectedWorkspaceId, requirements, rawText: rfpText }),
       });
       const data = await response.json();

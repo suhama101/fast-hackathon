@@ -20,15 +20,34 @@ const unauthorized = () => ({
   errorResponse: NextResponse.json({ error: "Authentication required" }, { status: 401 }),
 });
 
+const invalidSession = () => ({
+  errorResponse: NextResponse.json({ error: "Invalid or expired session. Please sign in again." }, { status: 401 }),
+});
+
+const authServiceUnavailable = (message) => ({
+  errorResponse: NextResponse.json(
+    { error: "Authentication check failed: " + message },
+    { status: 500 }
+  ),
+});
+
 export async function requireAuthenticatedUser(request) {
   const token = extractToken(request);
   if (!token) return unauthorized();
 
-  const supabase = createSupabaseAuthenticatedClient(token);
-  const { data, error } = await supabase.auth.getUser(token);
+  let supabase;
+  let data;
+  let error;
+
+  try {
+    supabase = createSupabaseAuthenticatedClient(token);
+    ({ data, error } = await supabase.auth.getUser(token));
+  } catch (err) {
+    return authServiceUnavailable(err.message || "Unable to reach Supabase Auth");
+  }
 
   if (error || !data?.user) {
-    return unauthorized();
+    return invalidSession();
   }
 
   const fullName =

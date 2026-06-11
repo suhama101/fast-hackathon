@@ -22,9 +22,15 @@ const SAMPLE_RFPS = [
 ];
 
 const PREVIEW_CHAR_LIMIT = 500;
+const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+const SUPPORTED_FILE_TYPES = new Set(["pdf", "docx", "txt", "md"]);
 
 function getPreviewText(text = "") {
   return text.slice(0, PREVIEW_CHAR_LIMIT);
+}
+
+function getFileExtension(filename = "") {
+  return filename.toLowerCase().split(".").pop() || "";
 }
 
 export default function FileUpload({ onTextParsed, isProcessing, initialText = "" }) {
@@ -33,6 +39,7 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
   const [previewText, setPreviewText] = useState(getPreviewText(initialText));
   const [alertMsg, setAlertMsg] = useState(null);
   const [fileName, setFileName] = useState("");
+  const [uploadedWorkspace, setUploadedWorkspace] = useState(null);
   const [progress, setProgress] = useState(0);
   const [selectedSampleRfp, setSelectedSampleRfp] = useState(SAMPLE_RFPS[0].path);
 
@@ -69,12 +76,22 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
 
   const handlePickedFile = async (file) => {
     setFileName("");
+    setUploadedWorkspace(null);
     setAlertMsg(null);
     setRfpText("");
     setPreviewText("");
     setProgress(10);
 
     try {
+      const ext = getFileExtension(file.name);
+      if (!SUPPORTED_FILE_TYPES.has(ext)) {
+        throw new Error("Unsupported file type. Please upload a PDF, DOCX, or plain text RFP.");
+      }
+
+      if (file.size > MAX_UPLOAD_BYTES) {
+        throw new Error("File is too large. Upload a PDF or DOCX smaller than 4 MB.");
+      }
+
       const authToken = typeof window !== "undefined" ? localStorage.getItem("bid_engine_token") : "";
       const formData = new FormData();
       formData.append("file", file);
@@ -101,16 +118,18 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
       setRfpText(extractedText);
       setPreviewText(data.previewText || getPreviewText(extractedText));
       setFileName(data.fileName || file.name);
+      setUploadedWorkspace(data.workspace || null);
       setProgress(100);
       setAlertMsg({
         type: "success",
-        text: `Parsed "${file.name}" on server (${data.characterCount || 0} characters). Click "Analyze RFP" to extract requirements.`
+        text: `Parsed and saved "${file.name}" (${data.characterCount || 0} characters). Click "Analyze RFP" to extract requirements.`
       });
     } catch (err) {
       console.warn("Server upload parser failed.", err);
       setProgress(0);
       setRfpText("");
       setPreviewText("");
+      setUploadedWorkspace(null);
       setAlertMsg({
         type: "error",
         text: err.message || "Failed to parse the provided document."
@@ -121,6 +140,7 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
   const handlePreviewChange = (e) => {
     setRfpText(e.target.value);
     setPreviewText(e.target.value);
+    setUploadedWorkspace(null);
   };
 
   const handleSubmitText = () => {
@@ -128,7 +148,11 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
       setAlertMsg({ type: "error", text: "Please enter or drop an RFP document to analyze." });
       return;
     }
-    onTextParsed(rfpText, { fileName });
+    onTextParsed(rfpText, {
+      fileName,
+      workspaceId: uploadedWorkspace?.id || null,
+      workspace: uploadedWorkspace,
+    });
   };
 
   const loadSampleRfp = async () => {
@@ -141,6 +165,7 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
       if (!response.ok) throw new Error("Sample RFP file could not be loaded.");
       const text = await response.text();
       setFileName(sample.fileName);
+      setUploadedWorkspace(null);
       setRfpText(text);
       setPreviewText(getPreviewText(text));
       setProgress(100);
@@ -218,7 +243,7 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
           type="file"
           id="rfp-file-input"
           className="hidden"
-          accept=".txt,.md,.pdf,.docx,.doc"
+          accept=".txt,.md,.pdf,.docx"
           onChange={handleFileInput}
         />
         <label htmlFor="rfp-file-input" className="cursor-pointer block">
