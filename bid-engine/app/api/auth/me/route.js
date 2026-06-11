@@ -11,7 +11,8 @@ export async function GET(request) {
     user: {
       id: user.id,
       email: user.email,
-      confirmed_at: user.confirmed_at || user.email_confirmed_at,
+      fullName: user.fullName || user.full_name,
+      role: user.role,
       created_at: user.created_at,
     },
   });

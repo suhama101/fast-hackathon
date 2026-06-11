@@ -2,9 +2,11 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Cpu, Mail, Lock, User, CheckCircle2, AlertCircle, ArrowRight } from "lucide-react";
 
 export default function Signup() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -23,7 +25,7 @@ export default function Signup() {
       const response = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, name }),
+        body: JSON.stringify({ email, password, fullName: name }),
       });
 
       const data = await response.json();
@@ -31,15 +33,13 @@ export default function Signup() {
         throw new Error(data.error || "Failed to configure account.");
       }
 
-      if (!data.user?.id || !data.session?.access_token) {
-        throw new Error("Registration failed. Supabase did not return a valid session.");
+      if (!data.token) {
+        throw new Error("Registration failed. No token was returned.");
       }
 
-      localStorage.setItem("bid_engine_user_email", data.user.email || email);
-      setMsg({ type: "success", text: "Successfully registered! Redirecting to setup..." });
-      setTimeout(() => {
-        window.location.href = "/dashboard";
-      }, 1500);
+      localStorage.setItem("bid_engine_token", data.token);
+      localStorage.setItem("bid_engine_user_email", data.user?.email || email);
+      router.push("/dashboard");
     } catch (err) {
       localStorage.removeItem("bid_engine_token");
       localStorage.removeItem("bid_engine_user_email");

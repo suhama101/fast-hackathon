@@ -31,9 +31,9 @@ import {
 export default function DashboardPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("upload");
-  const [userEmail, setUserEmail] = useState("Authenticated user");
+  const [currentUser, setCurrentUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(true);
 
   // Workspace tracking state
   const [workspaces, setWorkspaces] = useState([]);
@@ -61,40 +61,49 @@ export default function DashboardPage() {
   const [alert, setAlert] = useState(null);
 
   useEffect(() => {
-    let isMounted = true;
-
-    const verifySession = async () => {
+    const checkAuth = async () => {
       try {
-        const response = await fetch("/api/auth/me", { cache: "no-store" });
-        const data = await response.json().catch(() => ({}));
-
-        if (!response.ok || !data.user?.id) {
-          throw new Error(data.error || "Authentication required");
+        const token = localStorage.getItem("bid_engine_token");
+        if (!token) {
+          router.push("/login");
+          return;
         }
 
-        if (!isMounted) return;
-        setUserEmail(data.user.email || localStorage.getItem("bid_engine_user_email") || "Authenticated user");
-        if (data.user.email) {
+        const res = await fetch("/api/auth/verify", {
+          headers: { Authorization: "Bearer " + token },
+        });
+
+        if (!res.ok) {
+          localStorage.removeItem("bid_engine_token");
+          localStorage.removeItem("bid_engine_user_email");
+          router.push("/login");
+          return;
+        }
+
+        const data = await res.json();
+        setCurrentUser(data.user);
+        if (data.user?.email) {
           localStorage.setItem("bid_engine_user_email", data.user.email);
         }
         setIsAuthenticated(true);
-      } catch (err) {
+      } catch {
         localStorage.removeItem("bid_engine_token");
         localStorage.removeItem("bid_engine_user_email");
-        if (isMounted) {
-          setIsAuthenticated(false);
-          router.replace("/login");
-        }
+        router.push("/login");
       } finally {
-        if (isMounted) setIsLoading(false);
+        setAuthLoading(false);
       }
     };
 
-    verifySession();
-    return () => {
-      isMounted = false;
-    };
+    checkAuth();
   }, [router]);
+
+  const handleSignOut = () => {
+    localStorage.removeItem("bid_engine_token");
+    localStorage.removeItem("bid_engine_user_email");
+    document.cookie = "bid_engine_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+    router.push("/login");
+  };
 
   const mapWorkspace = (workspace) => ({
     id: workspace.id,
@@ -475,7 +484,14 @@ export default function DashboardPage() {
   const compliancePassCount = requirements.filter(req => req.status === "pass").length;
   const complianceScorePercent = Math.round((compliancePassCount / requirements.length) * 100) || 75;
 
-  if (isLoading) return <div>Loading...</div>;
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="text-white text-xl">Loading...</div>
+      </div>
+    );
+  }
+
   if (!isAuthenticated) return null;
 
   return (
@@ -483,8 +499,8 @@ export default function DashboardPage() {
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        userEmail={userEmail}
-        onSignOut={() => typeof window !== "undefined" && (window.location.href = "/")}
+        userEmail={currentUser?.email || "Authenticated user"}
+        onSignOut={handleSignOut}
       />
 
       <div className="flex-grow flex flex-col lg:flex-row max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 gap-6">

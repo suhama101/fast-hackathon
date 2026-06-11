@@ -1,88 +1,79 @@
 import { NextResponse } from "next/server";
-import { getSupabaseAdmin } from "../../../../lib/supabaseClient";
+import { createClient } from "@supabase/supabase-js";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
-
-const mapLoginError = (message = "") => {
-  const text = String(message || "");
-  if (/rate limit|too many requests/i.test(text)) {
-    return { status: 429, error: "Supabase rate limit exceeded. Please wait and try again." };
-  }
-  if (/invalid login credentials|invalid credentials/i.test(text)) {
-    return { status: 401, error: "Invalid email or password." };
-  }
-  if (/email not confirmed/i.test(text)) {
-    return { status: 401, error: "Please confirm your email address before logging in." };
-  }
-  return { status: 401, error: text || "Login failed." };
-};
-
-const jsonWithClearedAuthCookie = (body, init) => {
-  const response = NextResponse.json(body, init);
-  response.cookies.set("bid_engine_token", "", {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: 0,
-    path: "/",
-  });
-  return response;
-};
-
-/**
- * Handles credentials-based user logging inside BidEngine AI
- */
 export async function POST(request) {
   try {
-    const payload = await request.json();
-    const email = normalizeEmail(payload.email);
-    const password = String(payload.password || "");
+    const { email: rawEmail, password: rawPassword } = await request.json();
+    const email = String(rawEmail || "").toLowerCase().trim();
+    const password = String(rawPassword || "");
 
-    if (!email || !EMAIL_REGEX.test(email)) {
-      return jsonWithClearedAuthCookie(
-        { error: "Please enter a valid email address." },
+    if (!email || !password) {
+      return NextResponse.json(
+        { error: "Email and password are required" },
         { status: 400 }
       );
     }
 
-    if (!password) {
-      return jsonWithClearedAuthCookie(
-        { error: "Password is required." },
-        { status: 400 }
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const jwtSecret = process.env.JWT_SECRET || process.env.SUPABASE_JWT_SECRET;
+
+    if (!supabaseUrl || !serviceKey) {
+      return NextResponse.json(
+        { error: "Server configuration error" },
+        { status: 500 }
       );
     }
 
-    const supabase = getSupabaseAdmin();
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+    const supabase = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false },
     });
 
-    if (error) {
-      const mapped = mapLoginError(error.message);
-      return jsonWithClearedAuthCookie({ error: mapped.error }, { status: mapped.status });
-    }
+    const { data: user, error: fetchError } = await supabase
+      .from("users")
+      .select("*")
+      .eq("email", email)
+      .single();
 
-    const token = data.session?.access_token;
-    if (!token) {
-      return jsonWithClearedAuthCookie(
-        { error: "Login succeeded, but no session token was returned." },
+    if (fetchError || !user) {
+      return NextResponse.json(
+        { error: "Invalid email or password" },
         { status: 401 }
       );
     }
 
-    const response = NextResponse.json(
+    const passwordMatch = await bcrypt.compare(password, user.password_hash);
+
+    if (!passwordMatch) {
+      return NextResponse.json(
+        { error: "Invalid email or password" },
+        { status: 401 }
+      );
+    }
+
+    const token = jwt.sign(
       {
-        success: true,
-        message: "Login successful",
-        user: data.user,
-        token,
-        session: data.session,
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+        fullName: user.full_name,
       },
-      { status: 200 }
+      jwtSecret || "fallback_secret_change_in_production",
+      { expiresIn: "7d" }
     );
+
+    const response = NextResponse.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.full_name,
+        role: user.role,
+      },
+    });
 
     response.cookies.set("bid_engine_token", token, {
       httpOnly: true,
@@ -93,10 +84,10 @@ export async function POST(request) {
     });
 
     return response;
-  } catch (err) {
-    console.error("Login route error:", err);
-    return jsonWithClearedAuthCookie(
-      { error: "Internal Server Error within Auth endpoint: " + err.message },
+  } catch (error) {
+    console.error("Login error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
       { status: 500 }
     );
   }

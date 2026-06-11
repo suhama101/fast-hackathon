@@ -2,9 +2,11 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Cpu, Mail, Lock, CheckCircle2, AlertCircle, ArrowRight } from "lucide-react";
 
 export default function Login() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -30,15 +32,13 @@ export default function Login() {
         throw new Error(data.error || "Authentication failed.");
       }
 
-      if (!data.user?.id || !data.session?.access_token) {
-        throw new Error("Authentication failed. Supabase did not return a valid session.");
+      if (!data.token) {
+        throw new Error("Authentication failed. No token was returned.");
       }
 
-      localStorage.setItem("bid_engine_user_email", data.user.email || email);
-      setMsg({ type: "success", text: "Successfully authenticated! Redirecting to dashboard..." });
-      setTimeout(() => {
-        window.location.href = "/dashboard";
-      }, 1500);
+      localStorage.setItem("bid_engine_token", data.token);
+      localStorage.setItem("bid_engine_user_email", data.user?.email || email);
+      router.push("/dashboard");
     } catch (err) {
       localStorage.removeItem("bid_engine_token");
       localStorage.removeItem("bid_engine_user_email");
