@@ -1,0 +1,170 @@
+import { matchRequirementToCapabilities } from "../../bid-engine/lib/datasetAnalysis.js";
+import { CAPABILITY_LIBRARY } from "../../bid-engine/lib/sampleData.js";
+import { requireAuthenticatedUser, requireWorkspaceOwner } from "../_lib/requestAuth.js";
+
+const isUuid = (value) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+
+const readBody = (req) => {
+  if (!req.body) return {};
+  if (typeof req.body === "string") {
+    try {
+      return JSON.parse(req.body);
+    } catch {
+      return {};
+    }
+  }
+  return req.body;
+};
+
+const normalizeRequirement = (req, index = 0) => ({
+  id: req.id || `REQ-${String(index + 1).padStart(3, "0")}`,
+  requirement_text: req.requirement_text || req.description || req.title || "",
+  requirement_type: req.requirement_type || "mandatory",
+  compliance_status: req.compliance_status || "partial",
+});
+
+export default async function handler(req, res) {
+  try {
+    if (req.method !== "POST") {
+      res.setHeader("Allow", ["POST"]);
+      return res.status(405).json({ error: "Method not allowed" });
+    }
+
+    const body = readBody(req);
+    const { workspaceId, requirements: clientRequirements = [], entities: clientEntities = null } = body;
+    const auth = await requireAuthenticatedUser(req);
+    if (auth.errorResponse) return res.status(auth.errorResponse.status).json(auth.errorResponse.body);
+
+    const { supabase } = auth;
+    let mode = "dataset";
+    let requirements = [];
+    let capabilities = [];
+
+    if (workspaceId && isUuid(workspaceId)) {
+      const ownership = await requireWorkspaceOwner(req, workspaceId);
+      if (ownership.errorResponse) return res.status(ownership.errorResponse.status).json(ownership.errorResponse.body);
+
+      const { data: dbRequirements, error: reqError } = await supabase
+        .from("rfp_requirements")
+        .select("*")
+        .eq("workspace_id", workspaceId);
+
+      if (reqError) throw reqError;
+      requirements = dbRequirements || [];
+    }
+
+    if (requirements.length === 0 && clientRequirements.length > 0) {
+      mode = "sample_mode";
+      requirements = clientRequirements.map(normalizeRequirement);
+    }
+
+    if (requirements.length === 0) {
+      return res.status(200).json({
+        success: true,
+        mode,
+        message: "No requirements found. Run extraction first.",
+        matches: [],
+        requirements: [],
+      });
+    }
+
+    const { data: dbCapabilities, error: capError } = await supabase
+      .from("capability_library")
+      .select("*");
+
+    if (!capError && dbCapabilities?.length) {
+      capabilities = dbCapabilities;
+    } else {
+      mode = "sample_mode";
+      capabilities = CAPABILITY_LIBRARY.map((item) => ({
+        external_id: item.id,
+        domain: item.skills?.[0] || item.client_type || "General",
+        project_name: item.project_name,
+        description: item.description,
+        project_summary: item.description,
+        certification: item.certifications?.join(", ") || "N/A",
+        certifications: item.certifications || [],
+        skills: item.skills || [],
+        year_completed: item.year_completed,
+        contract_value: item.contract_value,
+        duration_months: null,
+        client_type: item.client_type,
+      }));
+    }
+
+    const entityContext = clientEntities || {
+      deadlines: requirements
+        .filter((req) => req.requirement_type === "deadline")
+        .map((req) => req.extracted_value || req.requirement_text)
+        .filter(Boolean),
+      budgets: requirements
+        .filter((req) => /\bbudget|pkr|usd|\$|rs\.?/i.test(`${req.extracted_value || ""} ${req.requirement_text || ""}`))
+        .map((req) => req.extracted_value || req.requirement_text)
+        .filter(Boolean),
+      mandatory_clauses: requirements
+        .filter((req) => req.requirement_type === "mandatory")
+        .map((req) => req.requirement_text)
+        .filter(Boolean)
+        .slice(0, 10),
+    };
+
+    const matches = requirements.map((requirement, index) => {
+      const normalized = normalizeRequirement(requirement, index);
+      const match = matchRequirementToCapabilities(normalized, capabilities, { entities: entityContext });
+      return {
+        requirement_id: normalized.id,
+        requirement_text: normalized.requirement_text,
+        compliance_status: match.compliance_status,
+        confidence_score: match.confidence,
+        evidence: match.evidence,
+        reasoning: match.reasoning,
+      };
+    });
+
+    if (workspaceId && isUuid(workspaceId)) {
+      await Promise.all(matches.map((match) =>
+        supabase
+          .from("rfp_requirements")
+          .update({
+            compliance_status: match.compliance_status,
+            extracted_value: match.evidence,
+            matched_evidence: match.evidence,
+            match_confidence: match.confidence_score,
+            match_reasoning: match.reasoning,
+          })
+          .eq("id", match.requirement_id)
+          .eq("workspace_id", workspaceId)
+      ));
+    }
+
+    const requirementsWithMatches = requirements.map((requirement, index) => {
+      const normalized = normalizeRequirement(requirement, index);
+      const match = matches.find((item) => item.requirement_id === normalized.id);
+      return {
+        ...requirement,
+        compliance_status: match?.compliance_status || "partial",
+        matched_evidence: match?.evidence,
+        match_confidence: match?.confidence_score,
+        match_reasoning: match?.reasoning,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      mode,
+      workspaceId,
+      matches,
+      requirements: requirementsWithMatches,
+      capability_count: capabilities.length,
+      extracted_entities: entityContext,
+    });
+  } catch (err) {
+    console.error("Failure in matching route:", err);
+    return res.status(500).json({
+      success: false,
+      mode: "sample_mode_unavailable",
+      error: "Matching system encountered error: " + err.message,
+    });
+  }
+}

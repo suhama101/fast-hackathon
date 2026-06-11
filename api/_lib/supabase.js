@@ -1,0 +1,23 @@
+import { createClient } from "@supabase/supabase-js";
+
+const getEnv = (name) => {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required`);
+  return value;
+};
+
+const createServerClient = (apiKey) =>
+  createClient(getEnv("NEXT_PUBLIC_SUPABASE_URL"), apiKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+
+export const getSupabaseClient = () =>
+  createServerClient(getEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"));
+
+export const getSupabaseAdmin = () =>
+  createServerClient(getEnv("SUPABASE_SERVICE_ROLE_KEY"));
+
+export default getSupabaseClient;
