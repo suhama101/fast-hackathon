@@ -4,9 +4,7 @@ import React, { useState } from "react";
 import { CheckCircle2, ShieldAlert, AlertTriangle, Play, HelpCircle, Lightbulb } from "lucide-react";
 
 export default function ComplianceChecker({ requirements = [], matchMatrix = {}, onRunMatch, isMatching }) {
-  const [capabilitiesInput, setCapabilitiesInput] = useState(
-    "1. Holds verified AICPA SOC 2 Type II assurance certificate.\n2. Implements military-grade TLS 1.3 protocol encryption for all in-transit structures.\n3. Uptime operational SLA guarantee specified at 99.9% uptime limits.\n4. Scalable distributed servers capable of handling extensive API data loads."
-  );
+  const [capabilitiesInput, setCapabilitiesInput] = useState("");
 
   const getGradeStyle = (grade) => {
     switch (grade?.toLowerCase()) {
@@ -108,15 +106,16 @@ export default function ComplianceChecker({ requirements = [], matchMatrix = {},
               };
               const style = getGradeStyle(matrixItem.matchGrade);
               const GradeIcon = style.icon;
+              const displayId = req.displayId || req.display_id || req.id;
 
               return (
                 <div key={req.id} className="p-4 bg-[#0a0a0f]/80 rounded-xl border border-purple-950/15 space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-purple-955/20 pb-2">
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-mono font-bold bg-purple-950 px-1.5 py-0.5 rounded text-purple-450 border border-purple-900/40 animate-pulse">
-                        {req.id}
+                        {displayId}
                       </span>
-                      <h4 className="text-sm font-bold text-slate-200">{req.title}</h4>
+                      <h4 className="text-sm font-bold text-slate-200">{req.title || "Requirement"}</h4>
                     </div>
 
                     {/* Match Badge */}
@@ -131,7 +130,7 @@ export default function ComplianceChecker({ requirements = [], matchMatrix = {},
                       <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block font-mono">
                         Requirement Target:
                       </span>
-                      <p className="text-slate-300 mt-1 leading-relaxed">{req.description}</p>
+                      <p className="text-slate-300 mt-1 leading-relaxed">{req.description || req.requirement_text}</p>
                     </div>
 
                     <div className="bg-[#1a1a2e]/40 p-3 rounded-lg border border-purple-950/10">
@@ -147,6 +146,12 @@ export default function ComplianceChecker({ requirements = [], matchMatrix = {},
                   {matrixItem.reasoning && matrixItem.matchGrade !== "Pending" && (
                     <div className="text-xs bg-purple-950/15 p-2 rounded-lg border border-purple-900/20 text-slate-400">
                       <span className="font-semibold text-slate-350 font-mono">Fit Reasoning:</span> {matrixItem.reasoning}
+                    </div>
+                  )}
+
+                  {matrixItem.evidence && matrixItem.matchGrade !== "Pending" && (
+                    <div className="text-xs bg-emerald-950/10 p-2 rounded-lg border border-emerald-900/20 text-slate-400">
+                      <span className="font-semibold text-emerald-300 font-mono">Saved Evidence:</span> {matrixItem.evidence}
                     </div>
                   )}
                 </div>

@@ -1,9 +1,17 @@
 "use client";
 
 import React, { useState } from "react";
-import { Copy, Sparkles, Check, CheckSquare, Edit3, Save, RefreshCw } from "lucide-react";
+import { Copy, Sparkles, Check, Edit3, Save, RefreshCw } from "lucide-react";
 
-export default function ProposalDraft({ activeRequirement, onGenerateDraft, draftResponse, isDrafting }) {
+export default function ProposalDraft({
+  activeRequirement,
+  activeDraft = null,
+  onGenerateDraft,
+  onSaveDraft,
+  draftResponse,
+  isDrafting,
+  isSavingDraft,
+}) {
   const [tone, setTone] = useState("Deeply Technical and Compliant");
   const [content, setContent] = useState("");
   const [capInfo, setCapInfo] = useState("");
@@ -11,9 +19,7 @@ export default function ProposalDraft({ activeRequirement, onGenerateDraft, draf
 
   // Sync loaded draft Response from parent
   React.useEffect(() => {
-    if (draftResponse) {
-      setContent(draftResponse);
-    }
+    setContent(draftResponse || "");
   }, [draftResponse]);
 
   // Handle local state when activeRequirement shifts
@@ -40,6 +46,11 @@ export default function ProposalDraft({ activeRequirement, onGenerateDraft, draf
     });
   };
 
+  const handleSave = () => {
+    if (!onSaveDraft) return;
+    onSaveDraft(content);
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" id="proposal-draft-workspace">
       {/* Parameters & Configuration Column */}
@@ -60,7 +71,7 @@ export default function ProposalDraft({ activeRequirement, onGenerateDraft, draf
               Active Focus Target:
             </span>
             <h4 className="text-sm font-bold text-slate-200">{activeRequirement.title}</h4>
-            <p className="text-xs text-slate-450 mt-1">{activeRequirement.description}</p>
+            <p className="text-xs text-slate-450 mt-1">{activeRequirement.description || activeRequirement.requirement_text}</p>
           </div>
         ) : (
           <div className="p-3 bg-[#0a0a0f] border border-purple-950/20 rounded-xl text-center text-xs text-slate-500">
@@ -126,12 +137,23 @@ export default function ProposalDraft({ activeRequirement, onGenerateDraft, draf
               Workspace draft Editor
             </h3>
             <p className="text-xs text-slate-400 mt-1">
-              Verify accuracy and enrich your content response inline before final publication.
+              {activeDraft?.section_title || "Verify accuracy and enrich your content response inline before final publication."}
             </p>
           </div>
 
           <div className="flex items-center gap-2">
             {content && (
+              <>
+              {activeDraft?.id && (
+                <button
+                  onClick={handleSave}
+                  disabled={isSavingDraft}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0a0a0f] hover:bg-purple-950/20 disabled:opacity-60 rounded border border-purple-955/20 text-purple-300 text-xs font-semibold tracking-tight transition cursor-pointer"
+                >
+                  <Save className="h-4 w-4 text-purple-400" />
+                  <span>{isSavingDraft ? "Saving..." : "Save Edits"}</span>
+                </button>
+              )}
               <button
                 onClick={handleCopy}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0a0a0f] hover:bg-purple-950/20 active:bg-purple-900/10 rounded border border-purple-955/20 text-purple-300 text-xs font-semibold tracking-tight transition cursor-pointer"
@@ -148,6 +170,7 @@ export default function ProposalDraft({ activeRequirement, onGenerateDraft, draf
                   </>
                 )}
               </button>
+              </>
             )}
           </div>
         </div>

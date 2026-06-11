@@ -1,0 +1,84 @@
+Tender - Supply Chain Management Services
+Organization: Pakistan Customs
+Reference: PC-SCMS-2026-09
+
+1. Background and Objective
+Pakistan Customs invites tenders from experienced logistics and supply chain
+management providers to support secure movement, storage, tracking, and reporting
+for customs inspection materials, seized goods, bonded cargo samples, equipment,
+and official records across selected border stations, dry ports, airports, and
+regional warehouses.
+
+The selected vendor will provide integrated transport planning, warehousing,
+inventory control, chain-of-custody reporting, technology-enabled tracking, and
+performance analytics. The solution must improve transparency, reduce delays,
+and protect sensitive goods from loss, tampering, and unauthorized access.
+
+2. Scope of Services
+The successful bidder shall provide:
+- Domestic freight management across designated customs locations.
+- Secure warehousing with inventory control, access logs, CCTV, and fire safety.
+- Barcode or RFID-based tracking for goods, samples, and equipment.
+- Route planning, dispatch coordination, proof of delivery, and exception reporting.
+- Cold-chain capability for temperature-sensitive samples when required.
+- Reverse logistics for return, disposal, auction preparation, or transfer of goods.
+- Monthly KPI reporting, dashboard access, and incident reporting.
+- Dedicated account manager and escalation contact for urgent shipments.
+
+3. Mandatory Requirements
+- Bidder must be legally registered and authorized to provide logistics services in Pakistan.
+- Bidder must have at least five years of supply chain management experience.
+- Bidder must operate or contract secure warehouse capacity in at least three regions.
+- Bidder must demonstrate GPS tracking, barcode, RFID, or equivalent shipment visibility tools.
+- Bidder must provide chain-of-custody controls for sensitive goods and official records.
+- Bidder must have experience with government, customs, regulated cargo, or high-value goods.
+- Bidder must maintain cargo insurance, vehicle compliance, driver verification, and safety procedures.
+- Bidder must provide disaster recovery and contingency plans for strikes, floods, border closures, and system outages.
+- Data reports must be available to Pakistan Customs in exportable electronic format.
+
+4. Evaluation Criteria
+Technical and financial proposals will be evaluated using the following weights:
+- Network coverage, fleet capability, and warehouse readiness: 25 percent
+- Tracking technology, reporting dashboard, and data quality: 25 percent
+- Relevant government or regulated logistics experience: 20 percent
+- Security, insurance, and chain-of-custody controls: 15 percent
+- Financial proposal and operational value: 15 percent
+
+5. Budget
+The estimated contract budget is PKR 65M to PKR 95M for an initial two-year
+period. Pricing must include transportation rates, warehouse charges, technology
+fees, insurance costs, reporting costs, and any mobilization charges.
+
+6. Submission Deadline
+Tender submissions must be delivered to the Pakistan Customs Procurement Cell by
+30 November 2026 at 12:00 PM Pakistan Standard Time. Pre-bid questions must be
+submitted by 10 November 2026. A pre-bid conference will be held on
+15 November 2026.
+
+7. Certifications and Compliance Clauses
+- Active taxpayer status and valid company registration.
+- Cargo insurance and public liability insurance.
+- Security SOPs, driver verification, warehouse access control, and incident
+  reporting procedures.
+- Compliance with customs regulations, procurement rules, labor laws, data
+  privacy obligations, and anti-corruption declarations.
+- ISO 9001, ISO 28000, AEO, TAPA, or equivalent logistics/security certification
+  will be considered favorably.
+
+8. Questions to Answer
+1. Describe your national logistics network, warehouse locations, fleet access,
+   and ability to support border, airport, and dry port operations.
+2. Explain your shipment tracking technology, chain-of-custody process, reporting
+   dashboard, and data export capabilities.
+3. Provide five examples of similar logistics contracts, including client type,
+   contract value, duration, service scope, and performance results.
+4. Describe your security controls for sensitive goods, seized materials,
+   official records, and high-value cargo.
+5. Provide a detailed pricing model with transport rates, warehouse fees,
+   insurance, technology charges, taxes, and assumptions.
+
+9. Submission Format
+Tender packages must include technical proposal, financial proposal, company
+profile, insurance certificates, warehouse details, fleet details, technology
+description, project references, compliance checklist, and signed declarations.
+Pakistan Customs reserves the right to reject non-compliant or incomplete bids.

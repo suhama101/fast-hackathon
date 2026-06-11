@@ -1,4 +1,5 @@
 import { parseRawRfpDocument } from "../../bid-engine/lib/pdfParser.js";
+import { requireAuthenticatedUser } from "../_lib/requestAuth.js";
 
 const readBody = (req) => {
   if (!req.body) return {};
@@ -44,6 +45,11 @@ export default async function handler(req, res) {
     if (req.method !== "POST") {
       res.setHeader("Allow", ["POST"]);
       return res.status(405).json({ error: "Method not allowed" });
+    }
+
+    const auth = await requireAuthenticatedUser(req);
+    if (auth.errorResponse) {
+      return res.status(auth.errorResponse.status).json(auth.errorResponse.body);
     }
 
     const payload = readBody(req);

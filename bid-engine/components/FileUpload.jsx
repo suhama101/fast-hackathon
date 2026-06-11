@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { UploadCloud, FileText, CheckCircle, AlertCircle, ArrowRight, Loader } from "lucide-react";
 
 const SAMPLE_RFPS = [
@@ -28,6 +28,10 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
   const [fileName, setFileName] = useState("");
   const [progress, setProgress] = useState(0);
   const [selectedSampleRfp, setSelectedSampleRfp] = useState(SAMPLE_RFPS[0].path);
+
+  useEffect(() => {
+    setRfpText(initialText || "");
+  }, [initialText]);
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -60,9 +64,10 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
     reader.onload = (event) => {
       const text = event.target.result;
       setRfpText(text);
+      setProgress(100);
       setAlertMsg({
         type: "success",
-        text: `Loaded "${file.name}" in sample mode. For PDF/DOCX accuracy, run through the Next.js dashboard parser.`
+        text: `Loaded "${file.name}" as text. Click "Analyze RFP" to save extracted requirements.`
       });
     };
     reader.onerror = () => {
@@ -71,30 +76,33 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
     reader.readAsText(file);
   };
 
+  const readFileAsDataUrl = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => resolve(event.target.result);
+      reader.onerror = () => reject(new Error("Could not read the selected file."));
+      reader.readAsDataURL(file);
+    });
+
   const handlePickedFile = async (file) => {
     setFileName(file.name);
     setAlertMsg(null);
     setProgress(10);
 
-    // Simulate upload/loading progress indicator
-    const timer = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(timer);
-          return 100;
-        }
-        return prev + 15;
-      });
-    }, 100);
-
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("title", file.name.replace(/\.[^.]+$/, ""));
+      const dataUrl = await readFileAsDataUrl(file);
+      setProgress(45);
 
       const response = await fetch("/api/rfp/upload", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          dataUrl,
+          fileName: file.name,
+          fileType: file.type || "application/octet-stream",
+          title: file.name.replace(/\.[^.]+$/, ""),
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Upload parser unavailable.");
@@ -116,7 +124,7 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
       setAlertMsg({ type: "error", text: "Please enter or drop an RFP document to analyze." });
       return;
     }
-    onTextParsed(rfpText);
+    onTextParsed(rfpText, { fileName });
   };
 
   const loadSampleRfp = async () => {
@@ -178,7 +186,7 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
         <div className={`p-4 rounded-lg flex items-start gap-3 text-sm ${
           alertMsg.type === "success" 
             ? "bg-emerald-950/35 text-emerald-300 border border-emerald-900/50" 
-            : "bg-rose-950/3b text-rose-300 border border-rose-900/50"
+            : "bg-rose-950/35 text-rose-300 border border-rose-900/50"
         }`}>
           {alertMsg.type === "success" ? (
             <CheckCircle className="h-5 w-5 shrink-0 text-emerald-400" />

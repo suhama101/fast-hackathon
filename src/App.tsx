@@ -12,6 +12,106 @@ import ProposalDraft from "../bid-engine/components/ProposalDraft";
 import WinScoreDashboard from "../bid-engine/components/WinScoreDashboard";
 import { Cpu, FileText, CheckCircle, ShieldAlert, Award, ArrowRight, Sparkles, LayoutDashboard } from "lucide-react";
 
+const compactText = (value: any, max = 90) => {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  return text.length > max ? `${text.slice(0, max - 1).trim()}...` : text;
+};
+
+const normalizeRequirement = (row: any, index = 0) => {
+  const requirementType = row.requirement_type || row.type || "mandatory";
+  const requirementText = row.requirement_text || row.description || row.title || "";
+  const extractedValue = row.extracted_value || "";
+  const category =
+    row.category ||
+    (requirementType === "deadline"
+      ? "Deadline"
+      : requirementType === "evaluation"
+        ? "Evaluation"
+        : String(extractedValue).includes("Question")
+          ? "Question"
+          : "Mandatory");
+  const prefix = category.slice(0, 3).toUpperCase() || "REQ";
+  const status = row.compliance_status || row.status || "partial";
+
+  return {
+    ...row,
+    id: row.id || row.requirement_id || `REQ-${index + 1}`,
+    displayId: row.displayId || row.display_id || `${prefix}-${String(index + 1).padStart(3, "0")}`,
+    title: row.title || compactText(requirementText, 72) || `Requirement ${index + 1}`,
+    description: requirementText || row.content || "No requirement text was returned.",
+    category,
+    severity:
+      row.severity ||
+      (requirementType === "mandatory"
+        ? "Critical"
+        : requirementType === "deadline"
+          ? "Important"
+          : "Standard"),
+    status,
+    compliance_status: status,
+    requirement_type: requirementType,
+    extracted_value: extractedValue,
+  };
+};
+
+const normalizeRequirements = (rows: any[] = []) => rows.map((row, index) => normalizeRequirement(row, index));
+
+const gradeFromMatch = (status: string, confidence?: number | null) => {
+  if (!status) return "Pending";
+  if (status === "pass") return Number(confidence || 0) >= 75 ? "Outstanding" : "Strong";
+  if (status === "partial") return "Partial";
+  if (status === "fail") return "Poor";
+  return "Pending";
+};
+
+const buildMatchMatrix = (rows: any[] = []) =>
+  rows.reduce((matrix: any, row: any) => {
+    const hasMatchEvidence = row.matched_evidence || row.match_reasoning || row.match_confidence !== undefined;
+    if (!hasMatchEvidence) return matrix;
+
+    const status = row.compliance_status || row.status || "partial";
+    matrix[row.id] = {
+      matchGrade: gradeFromMatch(status, row.match_confidence),
+      reasoning: row.match_reasoning || "Compliance match was saved for this requirement.",
+      recommendation:
+        status === "pass"
+          ? "Use the matched evidence directly in the proposal response."
+          : status === "fail"
+            ? "Resolve this gap before final submission or mark it as a delivery risk."
+            : "Add stronger supporting proof before approving this response.",
+      evidence: row.matched_evidence || row.extracted_value || "No saved evidence text was returned.",
+      status,
+    };
+    return matrix;
+  }, {});
+
+const normalizeScore = (payload: any) => {
+  const score = payload?.scores || payload?.record || payload;
+  if (!score || (score.total_score === undefined && score.winScore === undefined)) return null;
+
+  const riskPenalty = Number(score.risk_penalty_score ?? 35);
+  const decision = score.decision || (Number(score.total_score ?? score.winScore) >= 70 ? "GO" : "NO-GO");
+
+  return {
+    winScore: Number(score.total_score ?? score.winScore ?? 0),
+    benchmarks: {
+      budgetAlignment: Number(score.budget_alignment ?? score.budgetAlignment ?? 0),
+      capabilityMatch: Number(score.capability_match ?? score.capabilityMatch ?? 0),
+      complianceScore: Number(score.compliance_score ?? score.complianceScore ?? 0),
+      riskBuffer: Math.max(0, 100 - riskPenalty),
+    },
+    decision,
+    remedialActions: [
+      decision === "GO"
+        ? "Proceed with proposal drafting while keeping final compliance proof attached."
+        : "Close failed mandatory gaps before submitting this opportunity.",
+      "Review budget alignment, matched evidence, and risk score before final approval.",
+    ],
+    raw: score,
+  };
+};
+
 export default function App() {
   const [screen, setScreen] = useState<"landing" | "login" | "signup" | "dashboard">("landing");
   const [authLoading, setAuthLoading] = useState(true);
@@ -25,35 +125,35 @@ export default function App() {
   const [authMessage, setAuthMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   
   // Dashboard states
+  const [currentWorkspace, setCurrentWorkspace] = useState<any>(null);
   const [rfpText, setRfpText] = useState("");
-  const [requirements, setRequirements] = useState<any[]>([
-    { id: "SEC-001", title: "SOC 2 Type II Credentials", category: "Security", severity: "Critical", status: "pass", description: "Candidate engine MUST hold SOC 2 Type II audit certifications verified by high performance credential bodies." },
-    { id: "TEC-002", title: "99.99% Uptime SLA", category: "Technical", severity: "Critical", status: "pass", description: "Proposed solutions must operate with stable throughput constraints supporting 99.9% uptime and dynamic horizontal auto-scaling." },
-    { id: "COMM-003", title: "Itemized Operational Licences", category: "Commercial", severity: "Important", status: "partial", description: "Provide comprehensive line-by-line financial metrics clarifying core operating license fees and dedicated training packages." },
-    { id: "EXP-004", title: "Multi-Node Deliveries SOW", category: "Experience", severity: "Standard", status: "fail", description: "Must provide minimum of 3 past customer success evidence benchmarks delivering multi-node database systems." }
-  ]);
+  const [requirements, setRequirements] = useState<any[]>([]);
   const [selectedRequirement, setSelectedRequirement] = useState<any>(null);
-  const [matchMatrix, setMatchMatrix] = useState<any>({
-    "SEC-001": { matchGrade: "Outstanding", reasoning: "Holds active SOC 2 verification certificates.", status: "pass", evidence: "SOC 2 Type II Certification signed April 2026." },
-    "TEC-002": { matchGrade: "Strong", reasoning: "Operational pipeline fits 99.99% uptime with cluster redundancy.", status: "pass", evidence: "High-Availability Multi-Region Kubernetes setups." },
-    "COMM-003": { matchGrade: "Partial", reasoning: "Annual tiers exist but lacks dedicated multi-year discount matrices.", status: "partial", evidence: "Standard Custom Contract SLA pricing." },
-    "EXP-004": { matchGrade: "Unmatched", reasoning: "Lacks explicit multi-node portfolio evidence in library database.", status: "fail", evidence: "No immediate prior matching project of size." }
-  });
+  const [matchMatrix, setMatchMatrix] = useState<any>({});
+  const [savedDrafts, setSavedDrafts] = useState<any[]>([]);
+  const [activeDraft, setActiveDraft] = useState<any>(null);
   const [activeDraftText, setActiveDraftText] = useState("");
   const [ratingAnalysis, setRatingAnalysis] = useState<any>(null);
 
   // loading states
+  const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isMatching, setIsMatching] = useState(false);
   const [isDrafting, setIsDrafting] = useState(false);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isPredicting, setIsPredicting] = useState(false);
   const [alert, setAlert] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
-    if (requirements.length > 0 && !selectedRequirement) {
+    if (requirements.length === 0) {
+      setSelectedRequirement(null);
+      return;
+    }
+
+    if (!selectedRequirement || !requirements.some((req) => req.id === selectedRequirement.id)) {
       setSelectedRequirement(requirements[0]);
     }
-  }, [requirements]);
+  }, [requirements, selectedRequirement]);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,6 +206,68 @@ export default function App() {
       };
     }
   };
+
+  const loadWorkspaceDetails = async (workspaceId: string) => {
+    if (!workspaceId) return;
+
+    const response = await fetch(`/api/workspaces?workspaceId=${encodeURIComponent(workspaceId)}`, {
+      credentials: "include",
+    });
+    const data: any = await readApiResponse(response);
+    if (!response.ok) {
+      throw new Error(data.error || `Failed to load workspace (${response.status}).`);
+    }
+
+    const normalizedRequirements = normalizeRequirements(data.requirements || []);
+    const drafts = data.drafts || [];
+    const firstDraft = drafts[0] || null;
+
+    setCurrentWorkspace(data.workspace || null);
+    setRfpText(data.workspace?.raw_text || "");
+    setRequirements(normalizedRequirements);
+    setMatchMatrix(buildMatchMatrix(normalizedRequirements));
+    setSavedDrafts(drafts);
+    setActiveDraft(firstDraft);
+    setActiveDraftText(firstDraft?.content || "");
+    setRatingAnalysis(normalizeScore(data.score));
+  };
+
+  const loadLatestWorkspace = async () => {
+    if (!isAuthenticated) return;
+
+    setIsLoadingWorkspace(true);
+    try {
+      const response = await fetch("/api/workspaces", { credentials: "include" });
+      const data: any = await readApiResponse(response);
+      if (!response.ok) {
+        throw new Error(data.error || `Failed to load workspaces (${response.status}).`);
+      }
+
+      const latest = data.workspaces?.[0];
+      if (latest?.id) {
+        await loadWorkspaceDetails(latest.id);
+      } else {
+        setCurrentWorkspace(null);
+        setRfpText("");
+        setRequirements([]);
+        setMatchMatrix({});
+        setSavedDrafts([]);
+        setActiveDraft(null);
+        setActiveDraftText("");
+        setRatingAnalysis(null);
+      }
+    } catch (error: any) {
+      setAlert({ type: "error", text: error.message || "Could not load saved workspace data." });
+    } finally {
+      setIsLoadingWorkspace(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      void loadLatestWorkspace();
+    }
+  }, [isAuthenticated]);
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -199,146 +361,207 @@ export default function App() {
       setLoginPassword("");
       setSignupPassword("");
       setAuthMessage(null);
+      setCurrentWorkspace(null);
+      setRfpText("");
+      setRequirements([]);
+      setMatchMatrix({});
+      setSavedDrafts([]);
+      setActiveDraft(null);
+      setActiveDraftText("");
+      setRatingAnalysis(null);
       setScreen("landing");
     }
   };
 
   // 1. Text Parsing & RFP Extraction
-  const executeRfpAnalysis = async (text: string) => {
+  const executeRfpAnalysis = async (text: string, meta: any = {}) => {
     setIsAnalyzing(true);
     setRfpText(text);
     setAlert(null);
 
-    setTimeout(() => {
-      const mockRequirements = [
-        {
-          id: "SEC-001",
-          title: "SOC 2 Type II Credentials",
-          description: "Candidate engine MUST hold SOC 2 Type II audit certifications verified by high performance credential bodies.",
-          category: "Security",
-          severity: "Critical",
-          status: "pass"
-        },
-        {
-          id: "TEC-002",
-          title: "99.99% Uptime SLA",
-          description: "Proposed solutions must operate with stable throughput constraints supporting 99.9% uptime and dynamic horizontal auto-scaling.",
-          category: "Technical",
-          severity: "Critical",
-          status: "pass"
-        },
-        {
-          id: "COMM-003",
-          title: "Itemized Operational Licences",
-          description: "Provide comprehensive line-by-line financial metrics clarifying core operating license fees and dedicated training packages.",
-          category: "Commercial",
-          severity: "Important",
-          status: "partial"
-        },
-        {
-          id: "EXP-004",
-          title: "Multi-Node Deliveries SOW",
-          description: "Must provide minimum of 3 past customer success evidence benchmarks delivering multi-node database systems.",
-          category: "Experience",
-          severity: "Standard",
-          status: "fail"
-        }
-      ];
-      setRequirements(mockRequirements);
-      setSelectedRequirement(mockRequirements[0]);
+    try {
+      const response = await fetch("/api/rfp/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          rawText: text,
+          bidTitle: meta.fileName || currentWorkspace?.title || `RFP Workspace - ${new Date().toLocaleDateString()}`,
+        }),
+      });
+      const data: any = await readApiResponse(response);
+      if (!response.ok) {
+        throw new Error(data.error || `RFP analysis failed (${response.status}).`);
+      }
+
+      await loadWorkspaceDetails(data.workspaceId);
+      setAlert({
+        type: "success",
+        text: `Saved workspace and ${data.requirements?.length || 0} extracted requirements to Supabase.`,
+      });
+      setActiveTab("requirements");
+    } catch (error: any) {
+      setAlert({ type: "error", text: error.message || "RFP analysis failed." });
+    } finally {
       setIsAnalyzing(false);
-      setAlert({ type: "success", text: "Successfully completed cognitive audit analysis!" });
-      
-      setTimeout(() => {
-        setActiveTab("requirements");
-        setAlert(null);
-      }, 1200);
-    }, 1500);
+    }
   };
 
   // 2. Map Capabilites
   const executeMatching = async (capsList: string[]) => {
+    if (!currentWorkspace?.id) {
+      setAlert({ type: "error", text: "Analyze an RFP first so the workspace exists in Supabase." });
+      return;
+    }
+
     setIsMatching(true);
     setAlert(null);
 
-    setTimeout(() => {
-      const computedMatrix: any = {
-        "SEC-001": {
-          matchGrade: "Outstanding",
-          reasoning: "Matched against SOC 2 Type II active certificates referenced on profile.",
-          recommendation: "Attach current audit scope letters directly in proposal appendix."
-        },
-        "TEC-002": {
-          matchGrade: "Strong",
-          reasoning: "Hot standby master clusters configured securely in secondary region nodes.",
-          recommendation: "Illustrate real-time health statistics in the core text representation."
-        },
-        "COMM-003": {
-          matchGrade: "Partial",
-          reasoning: "Annual operating pricing tiers defined, but lacks explicit details on training packages.",
-          recommendation: "Supplement the section using detailed training modules catalog data."
-        },
-        "EXP-004": {
-          matchGrade: "Unmatched",
-          reasoning: "Historical capability catalog does not detail past multi-node deployments of similar size.",
-          recommendation: "Partner with local engineering staff to formulate temporary proof of readiness benchmarks."
-        }
-      };
-      setMatchMatrix(computedMatrix);
+    try {
+      const response = await fetch("/api/rfp/match", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          workspaceId: currentWorkspace.id,
+          capabilityNotes: capsList.join("\n"),
+        }),
+      });
+      const data: any = await readApiResponse(response);
+      if (!response.ok) {
+        throw new Error(data.error || `Compliance matching failed (${response.status}).`);
+      }
+
+      const normalizedRequirements = normalizeRequirements(data.requirements || []);
+      setRequirements(normalizedRequirements);
+      setMatchMatrix(buildMatchMatrix(normalizedRequirements));
+      setAlert({
+        type: "success",
+        text: `Saved compliance matches for ${data.matches?.length || normalizedRequirements.length} requirements.`,
+      });
+      setActiveTab("compliance");
+    } catch (error: any) {
+      setAlert({ type: "error", text: error.message || "Compliance matching failed." });
+    } finally {
       setIsMatching(false);
-      setAlert({ type: "success", text: "Compliance matrix has been refreshed successfully based on evidence profiles." });
-    }, 1200);
+    }
   };
 
   // 3. Draft Responses
   const executeDrafting = async (params: any) => {
+    if (!currentWorkspace?.id) {
+      setAlert({ type: "error", text: "Analyze an RFP first so a draft can be saved to Supabase." });
+      return;
+    }
+
     setIsDrafting(true);
     setAlert(null);
 
-    setTimeout(() => {
-      const synthesizedText = `# RFP RESPONSE DRAFT: ${params.requirement.title} (${params.requirement.id})
+    try {
+      const response = await fetch("/api/rfp/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          workspaceId: currentWorkspace.id,
+          requirementId: params.requirement?.id,
+          tone: params.tone,
+          capabilityInfo: params.capabilityInfo,
+        }),
+      });
+      const data: any = await readApiResponse(response);
+      if (!response.ok) {
+        throw new Error(data.error || `Proposal drafting failed (${response.status}).`);
+      }
 
-## 1. Executive Summary
-We explicitly confirm direct adherence to ${params.requirement.id} guidelines. Our services comply fully with all details referenced in the tender solicitation document without exceptions.
+      const drafts = data.drafts || [];
+      const draft =
+        drafts.find((item: any) =>
+          params.requirement?.description &&
+          String(item.section_title || "").includes(compactText(params.requirement.description, 30))
+        ) || drafts[0] || null;
 
-## 2. Methodology & Supporting Evidence
-For **${params.requirement.title}**, our technical operations deploy:
-- **Redundancy Limits:** Automatic replication across fault-tolerant storage sites.
-- **Failover Security:** Advanced monitoring services triggering instant health switches.
-- **Active Capacity Proof:** *"${params.capabilityInfo}"*.
-
-## 3. Operations & SLA Continuity
-All systems are backed with solid 99.9% availability guarantees. Standard health logs and detailed support processes remain accessible continuously.`;
-
-      setActiveDraftText(synthesizedText);
+      setSavedDrafts(drafts);
+      setActiveDraft(draft);
+      setActiveDraftText(draft?.content || "");
+      setAlert({ type: "success", text: `Generated and saved ${drafts.length || 0} proposal draft sections.` });
+      setActiveTab("draft");
+    } catch (error: any) {
+      setAlert({ type: "error", text: error.message || "Proposal drafting failed." });
+    } finally {
       setIsDrafting(false);
-      setAlert({ type: "success", text: `Synthesized response section draft successfully using Llama model parameters.` });
-    }, 1500);
+    }
   };
 
   // 4. Rate Bid
   const executePredictScore = async () => {
+    if (!currentWorkspace?.id) {
+      setAlert({ type: "error", text: "Analyze an RFP first so the win score can be saved to Supabase." });
+      return;
+    }
+
     setIsPredicting(true);
     setAlert(null);
 
-    setTimeout(() => {
-      setRatingAnalysis({
-        winScore: 72,
-        benchmarks: {
-          budgetAlignment: 85,
-          capabilityMatch: 75,
-          complianceScore: 90,
-          riskBuffer: 65
-        },
-        decision: "GO",
-        remedialActions: [
-          "Incorporate active SOC 2 compliance verification letters inside section responses.",
-          "Structure standard multi-year commitment subscription discounts to mitigate pricing objections."
-        ]
+    try {
+      const response = await fetch("/api/rfp/score", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          workspaceId: currentWorkspace.id,
+          rawText: rfpText,
+        }),
       });
+      const data: any = await readApiResponse(response);
+      if (!response.ok) {
+        throw new Error(data.error || `Win score failed (${response.status}).`);
+      }
+
+      setRatingAnalysis(normalizeScore(data.scores || data.record));
+      setAlert({ type: "success", text: "Calculated and saved win probability plus GO/NO-GO decision." });
+      setActiveTab("score");
+    } catch (error: any) {
+      setAlert({ type: "error", text: error.message || "Win probability scoring failed." });
+    } finally {
       setIsPredicting(false);
-      setAlert({ type: "success", text: "Win predictor model assessment computed successfully!" });
-    }, 1400);
+    }
+  };
+
+  const handleSaveDraft = async (content: string) => {
+    if (!activeDraft?.id) {
+      setAlert({ type: "error", text: "Generate a draft first before saving edits." });
+      return;
+    }
+
+    setIsSavingDraft(true);
+    setAlert(null);
+
+    try {
+      const response = await fetch("/api/rfp/draft", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          draftId: activeDraft.id,
+          content,
+          status: "edited",
+        }),
+      });
+      const data: any = await readApiResponse(response);
+      if (!response.ok) {
+        throw new Error(data.error || `Saving draft failed (${response.status}).`);
+      }
+
+      setActiveDraft(data.draft);
+      setActiveDraftText(data.draft?.content || content);
+      setSavedDrafts((drafts) => drafts.map((draft) => (draft.id === data.draft?.id ? data.draft : draft)));
+      setAlert({ type: "success", text: "Draft edits saved to Supabase." });
+    } catch (error: any) {
+      setAlert({ type: "error", text: error.message || "Saving draft failed." });
+    } finally {
+      setIsSavingDraft(false);
+    }
   };
 
   if (authLoading) {
@@ -585,10 +808,16 @@ All systems are backed with solid 99.9% availability guarantees. Standard health
               </div>
               
               <div className="px-3.5 py-2 bg-[#1a1a2e] border border-purple-955/20 rounded-lg flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                <span className={`w-2.5 h-2.5 rounded-full ${currentWorkspace?.id ? "bg-emerald-500" : "bg-amber-400"} animate-pulse shrink-0`} />
                 <div className="text-xs font-mono">
-                  <span className="text-slate-500">Workspace connection: </span>
-                  <span className="text-emerald-400 font-bold">READY</span>
+                  <span className="text-slate-500">Supabase workspace: </span>
+                  <span className={currentWorkspace?.id ? "text-emerald-400 font-bold" : "text-amber-300 font-bold"}>
+                    {isLoadingWorkspace
+                      ? "LOADING"
+                      : currentWorkspace?.title
+                        ? compactText(currentWorkspace.title, 34)
+                        : "NEW RFP"}
+                  </span>
                 </div>
               </div>
             </div>
@@ -648,15 +877,18 @@ All systems are backed with solid 99.9% availability guarantees. Standard health
               {activeTab === "draft" && (
                 <ProposalDraft
                   activeRequirement={selectedRequirement}
+                  activeDraft={activeDraft}
                   onGenerateDraft={executeDrafting}
+                  onSaveDraft={handleSaveDraft}
                   draftResponse={activeDraftText}
                   isDrafting={isDrafting}
+                  isSavingDraft={isSavingDraft}
                 />
               )}
 
               {activeTab === "score" && (
                 <WinScoreDashboard
-                  activeBidTitle="RFP Bid Response Pipeline"
+                  activeBidTitle={currentWorkspace?.title || "RFP Bid Response Pipeline"}
                   ratingAnalysis={ratingAnalysis}
                   onPredictScore={executePredictScore}
                   isPredicting={isPredicting}

@@ -24,6 +24,54 @@ export default async function handler(req, res) {
       }
 
       const { supabase, user } = auth;
+      const requestedWorkspaceId = req.query?.workspaceId || req.query?.id;
+
+      if (requestedWorkspaceId) {
+        if (!isUuid(requestedWorkspaceId)) {
+          return res.status(400).json({ error: "A valid workspaceId UUID is required." });
+        }
+
+        const workspaceCheck = await requireWorkspaceOwner(req, requestedWorkspaceId);
+        if (workspaceCheck.errorResponse) {
+          return res.status(workspaceCheck.errorResponse.status).json(workspaceCheck.errorResponse.body);
+        }
+
+        const [
+          { data: requirements, error: requirementsError },
+          { data: drafts, error: draftsError },
+          { data: score, error: scoreError },
+        ] = await Promise.all([
+          supabase
+            .from("rfp_requirements")
+            .select("*")
+            .eq("workspace_id", requestedWorkspaceId)
+            .order("created_at", { ascending: true }),
+          supabase
+            .from("proposal_drafts")
+            .select("*")
+            .eq("workspace_id", requestedWorkspaceId)
+            .order("created_at", { ascending: true }),
+          supabase
+            .from("win_scores")
+            .select("*")
+            .eq("workspace_id", requestedWorkspaceId)
+            .maybeSingle(),
+        ]);
+
+        if (requirementsError) throw requirementsError;
+        if (draftsError) throw draftsError;
+        if (scoreError) throw scoreError;
+
+        return res.status(200).json({
+          success: true,
+          mode: "dataset",
+          workspace: workspaceCheck.workspace,
+          requirements: requirements || [],
+          drafts: drafts || [],
+          score: score || null,
+        });
+      }
+
       const { data, error } = await supabase
         .from("rfp_workspaces")
         .select("*")

@@ -6,7 +6,7 @@ import { ListFilter, ShieldAlert, Award, FileSpreadsheet, Eye, ChevronRight } fr
 export default function RequirementsList({ requirements = [], onSelectRequirement }) {
   const [filterCategory, setFilterCategory] = useState("All");
 
-  const categories = ["All", ...new Set(requirements.map((req) => req.category))];
+  const categories = ["All", ...new Set(requirements.map((req) => req.category || "General"))];
 
   const filteredRequirements = filterCategory === "All"
     ? requirements
@@ -88,7 +88,7 @@ export default function RequirementsList({ requirements = [], onSelectRequiremen
                 <div className="space-y-1">
                   <div className="flex items-center flex-wrap gap-2">
                     <span className="text-xs font-mono font-bold text-indigo-400 px-2 py-0.5 bg-indigo-950/50 rounded border border-indigo-900">
-                      {req.id || `REQ-${index + 1}`}
+                      {req.displayId || req.display_id || req.id || `REQ-${index + 1}`}
                     </span>
                     <span className={`text-[10px] uppercase font-mono tracking-wider px-2 py-0.5 rounded border ${getSeverityBadge(req.severity)}`}>
                       {req.severity || "Standard"}
@@ -98,7 +98,7 @@ export default function RequirementsList({ requirements = [], onSelectRequiremen
                     </span>
                   </div>
                   <h3 className="text-base font-bold text-slate-100 group-hover:text-white pt-1">
-                    {req.title}
+                    {req.title || `Requirement ${index + 1}`}
                   </h3>
                 </div>
                 
@@ -109,7 +109,7 @@ export default function RequirementsList({ requirements = [], onSelectRequiremen
               </div>
 
               <p className="text-slate-300 text-sm mt-3 leading-relaxed border-t border-slate-850 pt-2.5">
-                {req.description}
+                {req.description || req.requirement_text}
               </p>
             </div>
           ))}

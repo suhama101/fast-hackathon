@@ -10,24 +10,9 @@ export default function WinScoreDashboard({
   isPredicting,
   requirements = []
 }) {
-  // Use current live ratingAnalysis or robust default template state inside sandbox
-  const analysis = ratingAnalysis || {
-    winScore: 72,
-    benchmarks: {
-      budgetAlignment: 85,
-      capabilityMatch: 75,
-      complianceScore: 90,
-      riskBuffer: 65
-    },
-    decision: "GO",
-    remedialActions: [
-      "Improve Pricing Competitiveness: Formulate a long-term enterprise subscription package offering at least a 10% volume discount.",
-      "Highlight Security Certifications: Provide direct links and signature logs of past operational SOC 2 Type II audit certificates."
-    ]
-  };
-
-  const winScore = analysis.winScore;
-  const decision = analysis.decision || (winScore > 70 ? "GO" : "NO-GO");
+  const analysis = ratingAnalysis;
+  const winScore = Number(analysis?.winScore || 0);
+  const decision = analysis?.decision || (winScore > 70 ? "GO" : "NO-GO");
 
   return (
     <div className="bg-[#1a1a2e] p-6 rounded-xl border border-purple-950/40 shadow-xl space-y-6" id="win-score-panel">
@@ -66,6 +51,14 @@ export default function WinScoreDashboard({
           <ShieldAlert className="h-10 w-10 text-slate-600 mx-auto mb-2" />
           <p className="text-slate-400 text-sm">No analysis history found for this workspace.</p>
           <p className="text-slate-500 text-xs mt-1">Please upload & extract requirements in Step 1 to compute win coefficients.</p>
+        </div>
+      ) : !analysis ? (
+        <div className="text-center py-20 bg-[#0a0a0f] rounded-xl border border-purple-950/10">
+          <ShieldAlert className="h-10 w-10 text-slate-600 mx-auto mb-2" />
+          <p className="text-slate-400 text-sm">No saved win score for this workspace yet.</p>
+          <p className="text-slate-500 text-xs mt-1">
+            Click Recalculate Win Score to call the backend scoring API and save the GO/NO-GO result.
+          </p>
         </div>
       ) : (
         <div className="space-y-6">
