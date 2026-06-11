@@ -17,6 +17,11 @@ export default async function handler(req, res) {
     user: {
       id: user.id,
       email: user.email,
+      fullName:
+        user.user_metadata?.display_name ||
+        user.user_metadata?.full_name ||
+        user.user_metadata?.name ||
+        null,
       confirmed_at: user.confirmed_at || user.email_confirmed_at,
       created_at: user.created_at,
     },

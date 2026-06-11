@@ -71,7 +71,14 @@ export default async function handler(req, res) {
     return res.status(200).json({
       success: true,
       message: "Login successful",
-      user: data.user,
+      user: {
+        ...data.user,
+        fullName:
+          data.user?.user_metadata?.display_name ||
+          data.user?.user_metadata?.full_name ||
+          data.user?.user_metadata?.name ||
+          null,
+      },
       token,
       session: data.session,
     });

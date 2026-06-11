@@ -14,9 +14,15 @@ import { Cpu, FileText, CheckCircle, ShieldAlert, Award, ArrowRight, Sparkles, L
 
 export default function App() {
   const [screen, setScreen] = useState<"landing" | "login" | "signup" | "dashboard">("landing");
+  const [authLoading, setAuthLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [activeTab, setActiveTab] = useState("upload");
   const [userEmail, setUserEmail] = useState("expert@bidengine.ai");
   const [userName, setUserName] = useState("Bid Analyst");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [signupPassword, setSignupPassword] = useState("");
+  const [authMessage, setAuthMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   
   // Dashboard states
   const [rfpText, setRfpText] = useState("");
@@ -48,6 +54,141 @@ export default function App() {
       setSelectedRequirement(requirements[0]);
     }
   }, [requirements]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncSession = async () => {
+      try {
+        const response = await fetch("/api/auth/me", { credentials: "include" });
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok || !data.user?.id) {
+          throw new Error(data.error || "Authentication required");
+        }
+
+        if (cancelled) return;
+
+        setUserEmail(data.user.email || "");
+        setUserName(
+          data.user.fullName ||
+            data.user.full_name ||
+            data.user.email?.split("@")[0] ||
+            "Bid Analyst"
+        );
+        setIsAuthenticated(true);
+        setScreen("dashboard");
+      } catch {
+        if (cancelled) return;
+        setIsAuthenticated(false);
+        setScreen("landing");
+      } finally {
+        if (!cancelled) setAuthLoading(false);
+      }
+    };
+
+    syncSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setIsAuthenticating(true);
+    setAuthMessage(null);
+
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email: userEmail, password: loginPassword }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Authentication failed.");
+      }
+
+      const token = data.session?.access_token || data.token;
+      if (token) {
+        localStorage.setItem("bid_engine_token", token);
+      }
+
+      setUserEmail(data.user?.email || userEmail);
+      setUserName(data.user?.fullName || userName);
+      setLoginPassword("");
+      setIsAuthenticated(true);
+      setScreen("dashboard");
+    } catch (error: any) {
+      setAuthMessage({
+        type: "error",
+        text: error.message || "Authentication failed.",
+      });
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  const handleSignup = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setIsAuthenticating(true);
+    setAuthMessage(null);
+
+    try {
+      const response = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email: userEmail, password: signupPassword, fullName: userName }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Registration failed.");
+      }
+
+      const token = data.session?.access_token || data.token;
+      if (token) {
+        localStorage.setItem("bid_engine_token", token);
+      }
+
+      setUserEmail(data.user?.email || userEmail);
+      setUserName(data.user?.fullName || userName);
+      setSignupPassword("");
+      setIsAuthenticated(true);
+      setScreen("dashboard");
+    } catch (error: any) {
+      setAuthMessage({
+        type: "error",
+        text: error.message || "Registration failed.",
+      });
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch {
+      // Ignore logout transport errors and still clear local state.
+    } finally {
+      localStorage.removeItem("bid_engine_token");
+      setIsAuthenticated(false);
+      setUserEmail("");
+      setUserName("Bid Analyst");
+      setLoginPassword("");
+      setSignupPassword("");
+      setAuthMessage(null);
+      setScreen("landing");
+    }
+  };
 
   // 1. Text Parsing & RFP Extraction
   const executeRfpAnalysis = async (text: string) => {
@@ -187,6 +328,14 @@ All systems are backed with solid 99.9% availability guarantees. Standard health
     }, 1400);
   };
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0f] text-slate-100 flex items-center justify-center">
+        <div className="text-sm text-slate-400 font-mono">Checking session...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-slate-150 flex flex-col font-sans">
       {screen === "landing" && (
@@ -202,7 +351,7 @@ All systems are backed with solid 99.9% availability guarantees. Standard health
               <button onClick={() => setScreen("login")} className="text-sm font-medium text-slate-400 hover:text-white transition cursor-pointer">
                 Sign In
               </button>
-              <button onClick={() => setScreen("dashboard")} className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-sm font-semibold text-white rounded-lg transition shadow-lg shadow-purple-600/15 flex items-center gap-1.5 cursor-pointer">
+              <button onClick={() => setScreen(isAuthenticated ? "dashboard" : "login")} className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-sm font-semibold text-white rounded-lg transition shadow-lg shadow-purple-600/15 flex items-center gap-1.5 cursor-pointer">
                 <span>Explore Workspace</span>
                 <LayoutDashboard className="h-4 w-4" />
               </button>
@@ -229,7 +378,7 @@ All systems are backed with solid 99.9% availability guarantees. Standard health
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
-              <button onClick={() => setScreen("dashboard")} className="cursor-pointer w-full sm:w-auto px-8 py-4 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-xl transition duration-200 shadow-xl shadow-purple-600/20 flex items-center justify-center gap-2">
+              <button onClick={() => setScreen(isAuthenticated ? "dashboard" : "login")} className="cursor-pointer w-full sm:w-auto px-8 py-4 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-xl transition duration-200 shadow-xl shadow-purple-600/20 flex items-center justify-center gap-2">
                 <span>Launch BidEngine Tool</span>
                 <ArrowRight className="h-4 w-4" />
               </button>
@@ -294,7 +443,13 @@ All systems are backed with solid 99.9% availability guarantees. Standard health
               <p className="text-xs text-slate-400">Sign in to start mapping complex RFPs instantly.</p>
             </div>
 
-            <form onSubmit={(e) => { e.preventDefault(); setScreen("dashboard"); }} className="space-y-4">
+            {authMessage && (
+              <div className={`p-3 rounded-lg text-xs border ${authMessage.type === "success" ? "bg-emerald-950/40 text-emerald-300 border-emerald-900" : "bg-rose-950/40 text-rose-300 border-rose-900"}`}>
+                {authMessage.text}
+              </div>
+            )}
+
+            <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-1">
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-405 font-mono">Email Address</label>
                 <input
@@ -308,12 +463,13 @@ All systems are backed with solid 99.9% availability guarantees. Standard health
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-405 font-mono">Password</label>
                 <input
                   type="password"
-                  defaultValue="developer"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
                   className="w-full bg-[#0a0a0f] text-slate-200 p-3 rounded-lg border border-purple-950/40 text-sm"
                 />
               </div>
-              <button type="submit" className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-lg text-sm transition cursor-pointer">
-                Enter Workspace
+              <button type="submit" disabled={isAuthenticating} className="w-full py-3 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white font-semibold rounded-lg text-sm transition cursor-pointer">
+                {isAuthenticating ? "Signing In..." : "Enter Workspace"}
               </button>
             </form>
 
@@ -337,7 +493,13 @@ All systems are backed with solid 99.9% availability guarantees. Standard health
               <p className="text-xs text-slate-400">Complete setup details for your organization.</p>
             </div>
 
-            <form onSubmit={(e) => { e.preventDefault(); setScreen("dashboard"); }} className="space-y-4">
+            {authMessage && (
+              <div className={`p-3 rounded-lg text-xs border ${authMessage.type === "success" ? "bg-emerald-950/40 text-emerald-300 border-emerald-900" : "bg-rose-950/40 text-rose-300 border-rose-900"}`}>
+                {authMessage.text}
+              </div>
+            )}
+
+            <form onSubmit={handleSignup} className="space-y-4">
               <div className="space-y-1">
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-405 font-mono">Full Name</label>
                 <input
@@ -360,12 +522,13 @@ All systems are backed with solid 99.9% availability guarantees. Standard health
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-405 font-mono">Secure Password</label>
                 <input
                   type="password"
-                  placeholder="••••••••"
+                  value={signupPassword}
+                  onChange={(e) => setSignupPassword(e.target.value)}
                   className="w-full bg-[#0a0a0f] text-slate-200 p-3 rounded-lg border border-purple-950/40 text-sm"
                 />
               </div>
-              <button type="submit" className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-lg text-sm transition cursor-pointer">
-                Create Workspace
+              <button type="submit" disabled={isAuthenticating} className="w-full py-3 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white font-semibold rounded-lg text-sm transition cursor-pointer">
+                {isAuthenticating ? "Creating Workspace..." : "Create Workspace"}
               </button>
             </form>
 
@@ -383,7 +546,7 @@ All systems are backed with solid 99.9% availability guarantees. Standard health
             activeTab={activeTab}
             setActiveTab={setActiveTab}
             userEmail={userEmail}
-            onSignOut={() => setScreen("landing")}
+            onSignOut={handleSignOut}
           />
 
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-grow w-full space-y-6">

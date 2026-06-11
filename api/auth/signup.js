@@ -39,7 +39,7 @@ export default async function handler(req, res) {
     const payload = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
     const email = normalizeEmail(payload.email);
     const password = String(payload.password || "");
-    const name = String(payload.name || "").trim();
+    const name = String(payload.fullName || payload.name || "").trim();
 
     if (!email || !EMAIL_REGEX.test(email)) {
       clearAuthCookie(res);
@@ -121,7 +121,11 @@ export default async function handler(req, res) {
     return res.status(201).json({
       success: true,
       message: "Registration successful.",
-      user: confirmedUser?.user || data.user,
+      user: {
+        ...(confirmedUser?.user || data.user),
+        fullName: confirmedUser?.user?.user_metadata?.display_name || name,
+      },
+      fullName: confirmedUser?.user?.user_metadata?.display_name || name,
       token,
       session: sessionData.session,
     });
