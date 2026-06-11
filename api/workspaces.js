@@ -15,6 +15,16 @@ const readBody = (req) => {
   return req.body;
 };
 
+const getQueryValue = (req, key) => {
+  if (req.query && req.query[key] !== undefined) return req.query[key];
+  try {
+    const url = new URL(req.url, "http://localhost");
+    return url.searchParams.get(key);
+  } catch {
+    return null;
+  }
+};
+
 export default async function handler(req, res) {
   try {
     if (req.method === "GET") {
@@ -24,7 +34,7 @@ export default async function handler(req, res) {
       }
 
       const { supabase, user } = auth;
-      const requestedWorkspaceId = req.query?.workspaceId || req.query?.id;
+      const requestedWorkspaceId = getQueryValue(req, "workspaceId") || getQueryValue(req, "id");
 
       if (requestedWorkspaceId) {
         if (!isUuid(requestedWorkspaceId)) {

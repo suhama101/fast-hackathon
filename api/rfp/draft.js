@@ -17,6 +17,16 @@ const readBody = (req) => {
   return req.body;
 };
 
+const getQueryValue = (req, key) => {
+  if (req.query && req.query[key] !== undefined) return req.query[key];
+  try {
+    const url = new URL(req.url, "http://localhost");
+    return url.searchParams.get(key);
+  } catch {
+    return null;
+  }
+};
+
 const draftFromTarget = (target, capability, extractedEntities) => {
   const sectionTitle = target.requirement_text?.slice(0, 80) || target.title || "Proposal Response Section";
   const evidence = capability?.project_summary || capability?.description || capability?.project_name || "Relevant project evidence.";
@@ -31,7 +41,7 @@ export default async function handler(req, res) {
   try {
     if (req.method === "GET") {
       const body = readBody(req);
-      const workspaceId = body.workspaceId || req.query?.workspaceId;
+      const workspaceId = body.workspaceId || getQueryValue(req, "workspaceId");
       if (!isUuid(workspaceId)) {
         return res.status(400).json({ error: "A valid workspaceId UUID is required." });
       }
