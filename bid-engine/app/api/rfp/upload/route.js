@@ -1,5 +1,21 @@
 import { NextResponse } from "next/server";
-import { parseRawRfpDocument } from "../../../../lib/pdfParser";
+import { extractTextFromFile } from "../../../../lib/pdfParser";
+
+export const runtime = "nodejs";
+
+function badRequest(message) {
+  return NextResponse.json({ error: message }, { status: 400 });
+}
+
+function looksLikeBinaryData(text = "") {
+  return (
+    text.includes("PK!") ||
+    text.includes("PK\u0003\u0004") ||
+    text.includes("[Content_Types]") ||
+    text.includes("\x00") ||
+    text.includes("\\x00")
+  );
+}
 
 /**
  * Handles multipart file uploads (RFPs) and converts them to readable text strings.
@@ -10,26 +26,33 @@ export async function POST(request) {
     const file = formData.get("file");
     const bidTitle = formData.get("title") || "Untitled RFP";
 
-    if (!file) {
-      return NextResponse.json(
-        { error: "No RFP file uploaded." },
-        { status: 400 }
-      );
+    if (!file || typeof file.arrayBuffer !== "function") {
+      return badRequest("No RFP file uploaded.");
     }
 
-    // Convert file content to array buffer & invoke custom parser tool
+    const filename = file.name || "uploaded-rfp";
+    const fileType = file.type || "";
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
-    const rawText = await parseRawRfpDocument(buffer, file.type);
+    const extractedText = await extractTextFromFile(buffer, filename, fileType);
+
+    if (looksLikeBinaryData(extractedText)) {
+      return badRequest("Could not read file. Please ensure it is a valid PDF or DOCX document.");
+    }
+
+    if (extractedText.trim().length < 100) {
+      return badRequest("File appears to be empty or could not be read properly.");
+    }
 
     return NextResponse.json(
       {
         success: true,
-        fileName: file.name,
-        fileType: file.type,
+        fileName: filename,
+        fileType,
         bidTitle,
-        characterCount: rawText.length,
-        rawText: rawText || "Extracted content was empty or unparseable. Try a PDF or text-based document."
+        characterCount: extractedText.length,
+        previewText: extractedText.slice(0, 500),
+        rawText: extractedText
       },
       { status: 200 }
     );
@@ -37,7 +60,7 @@ export async function POST(request) {
     console.error("Upload route error:", err);
     return NextResponse.json(
       { error: "Failed to parse uploaded RFP: " + err.message },
-      { status: 500 }
+      { status: 400 }
     );
   }
 }

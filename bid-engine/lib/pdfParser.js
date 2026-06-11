@@ -1,20 +1,29 @@
 import { PDFParse } from "pdf-parse";
 import mammoth from "mammoth";
 
+const MIN_EXTRACTED_TEXT_LENGTH = 50;
+
 /**
  * Extracts plain text from a PDF buffer using pdf-parse.
  * @param {Buffer} buffer - The file buffer of the PDF.
  * @returns {Promise<string>} - Clean extracted text.
  */
 export async function extractTextFromPDF(buffer) {
+  let parser;
+
   try {
-    const parser = new PDFParse({ data: buffer });
+    parser = new PDFParse({ data: buffer });
     const data = await parser.getText();
-    await parser.destroy();
-    return cleanText(data.text || "");
+    return ensureReadableText(data.text, "PDF");
   } catch (error) {
     console.error("Error parsing PDF with pdf-parse:", error);
-    throw new Error(`PDF Parsing failed: ${error.message}`);
+    throw new Error("PDF parsing failed: " + error.message);
+  } finally {
+    if (parser) {
+      await parser.destroy().catch((destroyError) => {
+        console.warn("Error cleaning up PDF parser:", destroyError);
+      });
+    }
   }
 }
 
@@ -26,10 +35,10 @@ export async function extractTextFromPDF(buffer) {
 export async function extractTextFromDOCX(buffer) {
   try {
     const result = await mammoth.extractRawText({ buffer });
-    return cleanText(result.value || "");
+    return ensureReadableText(result.value, "DOCX file");
   } catch (error) {
     console.error("Error parsing DOCX with mammoth:", error);
-    throw new Error(`DOCX Parsing failed: ${error.message}`);
+    throw new Error("DOCX parsing failed: " + error.message);
   }
 }
 
@@ -48,33 +57,52 @@ export function cleanText(text) {
     .trim();
 }
 
+function ensureReadableText(text, fileType) {
+  const cleanedText = cleanText(text || "");
+
+  if (!cleanedText || cleanedText.trim().length < MIN_EXTRACTED_TEXT_LENGTH) {
+    throw new Error(`Could not extract text from ${fileType}`);
+  }
+
+  return cleanedText;
+}
+
+function getFileExtension(filename = "") {
+  return filename.toLowerCase().split(".").pop() || "";
+}
+
 /**
  * Main dispatcher to parse text depending on document type.
  * Maintains compatibility with standard API endpoints.
  */
-export async function parseRawRfpDocument(buffer, fileType = "application/pdf") {
-  if (!buffer) return "";
-  let text = "";
-  
-  const mime = fileType ? fileType.toLowerCase() : "";
-  
-  try {
-    if (mime.includes("docx") || mime.includes("officedocument.wordprocessingml.document") || mime.includes("msword")) {
-      text = await extractTextFromDOCX(buffer);
-    } else if (mime.includes("pdf")) {
-      text = await extractTextFromPDF(buffer);
-    } else {
-      // Fallback: decode directly as plain text
-      text = buffer.toString("utf-8");
-    }
-  } catch (error) {
-    console.warn(`Type-specific parsing failed for ${fileType}. Falling back to plain text decoding.`, error);
-    try {
-      text = buffer.toString("utf-8");
-    } catch (fallbackError) {
-      throw new Error(`Failed to decode file buffer: ${fallbackError.message}`);
-    }
+export async function extractTextFromFile(buffer, filename = "", fileType = "") {
+  if (!buffer) {
+    throw new Error("No file buffer provided");
   }
 
-  return cleanText(text);
+  const ext = getFileExtension(filename);
+  const mime = fileType ? fileType.toLowerCase() : "";
+
+  if (ext === "pdf" || mime.includes("pdf")) {
+    return extractTextFromPDF(buffer);
+  }
+
+  if (
+    ext === "docx" ||
+    ext === "doc" ||
+    mime.includes("officedocument.wordprocessingml.document") ||
+    mime.includes("msword")
+  ) {
+    return extractTextFromDOCX(buffer);
+  }
+
+  if (ext === "txt" || ext === "md" || mime.startsWith("text/")) {
+    return cleanText(buffer.toString("utf-8"));
+  }
+
+  throw new Error("Unsupported file type: " + (ext || fileType || "unknown"));
+}
+
+export async function parseRawRfpDocument(buffer, fileType = "application/pdf", filename = "") {
+  return extractTextFromFile(buffer, filename, fileType);
 }

@@ -21,9 +21,16 @@ const SAMPLE_RFPS = [
   },
 ];
 
+const PREVIEW_CHAR_LIMIT = 500;
+
+function getPreviewText(text = "") {
+  return text.slice(0, PREVIEW_CHAR_LIMIT);
+}
+
 export default function FileUpload({ onTextParsed, isProcessing, initialText = "" }) {
   const [dragActive, setDragActive] = useState(false);
   const [rfpText, setRfpText] = useState(initialText);
+  const [previewText, setPreviewText] = useState(getPreviewText(initialText));
   const [alertMsg, setAlertMsg] = useState(null);
   const [fileName, setFileName] = useState("");
   const [progress, setProgress] = useState(0);
@@ -31,6 +38,7 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
 
   useEffect(() => {
     setRfpText(initialText || "");
+    setPreviewText(getPreviewText(initialText || ""));
   }, [initialText]);
 
   const handleDrag = (e) => {
@@ -59,64 +67,51 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
     }
   };
 
-  const readFileAsTextFallback = (file) => {
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target.result;
-      setRfpText(text);
-      setProgress(100);
-      setAlertMsg({
-        type: "success",
-        text: `Loaded "${file.name}" as text. Click "Analyze RFP" to save extracted requirements.`
-      });
-    };
-    reader.onerror = () => {
-      setAlertMsg({ type: "error", text: "Failed to parse the provided document text." });
-    };
-    reader.readAsText(file);
-  };
-
-  const readFileAsDataUrl = (file) =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (event) => resolve(event.target.result);
-      reader.onerror = () => reject(new Error("Could not read the selected file."));
-      reader.readAsDataURL(file);
-    });
-
   const handlePickedFile = async (file) => {
-    setFileName(file.name);
+    setFileName("");
     setAlertMsg(null);
+    setRfpText("");
+    setPreviewText("");
     setProgress(10);
 
     try {
-      const dataUrl = await readFileAsDataUrl(file);
-      setProgress(45);
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("title", file.name.replace(/\.[^.]+$/, ""));
 
       const response = await fetch("/api/rfp/upload", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({
-          dataUrl,
-          fileName: file.name,
-          fileType: file.type || "application/octet-stream",
-          title: file.name.replace(/\.[^.]+$/, ""),
-        }),
+        body: formData,
       });
-      const data = await response.json();
+      setProgress(70);
+
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Upload parser unavailable.");
 
-      setRfpText(data.rawText || "");
+      const extractedText = data.rawText || "";
+      if (!extractedText.trim()) throw new Error("No readable text was extracted from this file.");
+
+      setRfpText(extractedText);
+      setPreviewText(data.previewText || getPreviewText(extractedText));
+      setFileName(data.fileName || file.name);
       setProgress(100);
       setAlertMsg({
         type: "success",
         text: `Parsed "${file.name}" on server (${data.characterCount || 0} characters). Click "Analyze RFP" to extract requirements.`
       });
     } catch (err) {
-      console.warn("Server upload parser unavailable; using text fallback.", err);
-      readFileAsTextFallback(file);
+      console.warn("Server upload parser failed.", err);
+      setProgress(0);
+      setRfpText("");
+      setPreviewText("");
+      setAlertMsg({ type: "error", text: err.message || "Failed to parse the provided document." });
     }
+  };
+
+  const handlePreviewChange = (e) => {
+    setRfpText(e.target.value);
+    setPreviewText(e.target.value);
   };
 
   const handleSubmitText = () => {
@@ -138,6 +133,7 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
       const text = await response.text();
       setFileName(sample.fileName);
       setRfpText(text);
+      setPreviewText(getPreviewText(text));
       setProgress(100);
       setAlertMsg({
         type: "success",
@@ -213,7 +209,7 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
           type="file"
           id="rfp-file-input"
           className="hidden"
-          accept=".txt,.md,.pdf,.docx"
+          accept=".txt,.md,.pdf,.docx,.doc"
           onChange={handleFileInput}
         />
         <label htmlFor="rfp-file-input" className="cursor-pointer block">
@@ -255,8 +251,8 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
           RFP TEXT COGNITIVE PREVIEW
         </label>
         <textarea
-          value={rfpText}
-          onChange={(e) => setRfpText(e.target.value)}
+          value={previewText}
+          onChange={handlePreviewChange}
           placeholder="Or paste literal technical specifications, RFP guidelines, SOW criteria here..."
           className="w-full h-48 bg-[#0a0a0f] text-slate-200 p-4 rounded-xl border border-purple-950/40 focus:outline-none focus:border-purple-500 font-mono text-xs leading-relaxed"
         />
