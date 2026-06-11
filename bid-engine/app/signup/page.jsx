@@ -17,6 +17,9 @@ export default function Signup() {
     setMsg(null);
 
     try {
+      localStorage.removeItem("bid_engine_token");
+      localStorage.removeItem("bid_engine_user_email");
+
       const response = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -28,15 +31,18 @@ export default function Signup() {
         throw new Error(data.error || "Failed to configure account.");
       }
 
-      if (data.token) {
-        localStorage.setItem("bid_engine_token", data.token);
+      if (!data.user?.id || !data.session?.access_token) {
+        throw new Error("Registration failed. Supabase did not return a valid session.");
       }
 
+      localStorage.setItem("bid_engine_user_email", data.user.email || email);
       setMsg({ type: "success", text: "Successfully registered! Redirecting to setup..." });
       setTimeout(() => {
-        window.location.href = data.token ? "/dashboard" : "/login";
+        window.location.href = "/dashboard";
       }, 1500);
     } catch (err) {
+      localStorage.removeItem("bid_engine_token");
+      localStorage.removeItem("bid_engine_user_email");
       setMsg({ type: "error", text: err.message || "Registration failed." });
     } finally {
       setIsSubmitting(false);

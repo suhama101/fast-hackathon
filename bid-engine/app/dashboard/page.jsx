@@ -31,7 +31,7 @@ import {
 export default function DashboardPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("upload");
-  const [userEmail, setUserEmail] = useState("expert@bidengine.ai");
+  const [userEmail, setUserEmail] = useState("Authenticated user");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -61,15 +61,39 @@ export default function DashboardPage() {
   const [alert, setAlert] = useState(null);
 
   useEffect(() => {
-    const token = localStorage.getItem("bid_engine_token") ||
-                  document.cookie.includes("sb-access-token") ||
-                  document.cookie.includes("bid_engine_token");
-    if (!token) {
-      router.push("/login");
-      return;
-    }
-    setIsAuthenticated(true);
-    setIsLoading(false);
+    let isMounted = true;
+
+    const verifySession = async () => {
+      try {
+        const response = await fetch("/api/auth/me", { cache: "no-store" });
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok || !data.user?.id) {
+          throw new Error(data.error || "Authentication required");
+        }
+
+        if (!isMounted) return;
+        setUserEmail(data.user.email || localStorage.getItem("bid_engine_user_email") || "Authenticated user");
+        if (data.user.email) {
+          localStorage.setItem("bid_engine_user_email", data.user.email);
+        }
+        setIsAuthenticated(true);
+      } catch (err) {
+        localStorage.removeItem("bid_engine_token");
+        localStorage.removeItem("bid_engine_user_email");
+        if (isMounted) {
+          setIsAuthenticated(false);
+          router.replace("/login");
+        }
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+
+    verifySession();
+    return () => {
+      isMounted = false;
+    };
   }, [router]);
 
   const mapWorkspace = (workspace) => ({

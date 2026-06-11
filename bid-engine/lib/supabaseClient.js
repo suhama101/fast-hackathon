@@ -1,22 +1,24 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error("Missing Supabase environment variables");
-}
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: { persistSession: false },
-});
-
-export const getSupabaseAdmin = () => {
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!serviceKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY is required");
-  return createClient(supabaseUrl, serviceKey, {
-    auth: { persistSession: false },
-  });
+const getRequiredEnv = (name) => {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required`);
+  return value;
 };
 
-export default supabase;
+const createSupabaseServerClient = (apiKey) =>
+  createClient(getRequiredEnv("NEXT_PUBLIC_SUPABASE_URL"), apiKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+
+export const getSupabaseClient = () =>
+  createSupabaseServerClient(getRequiredEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"));
+
+export const getSupabaseAdmin = () => {
+  return createSupabaseServerClient(getRequiredEnv("SUPABASE_SERVICE_ROLE_KEY"));
+};
+
+export default getSupabaseClient;

@@ -19,6 +19,18 @@ const mapLoginError = (message = "") => {
   return { status: 401, error: text || "Login failed." };
 };
 
+const jsonWithClearedAuthCookie = (body, init) => {
+  const response = NextResponse.json(body, init);
+  response.cookies.set("bid_engine_token", "", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 0,
+    path: "/",
+  });
+  return response;
+};
+
 /**
  * Handles credentials-based user logging inside BidEngine AI
  */
@@ -29,14 +41,14 @@ export async function POST(request) {
     const password = String(payload.password || "");
 
     if (!email || !EMAIL_REGEX.test(email)) {
-      return NextResponse.json(
+      return jsonWithClearedAuthCookie(
         { error: "Please enter a valid email address." },
         { status: 400 }
       );
     }
 
     if (!password) {
-      return NextResponse.json(
+      return jsonWithClearedAuthCookie(
         { error: "Password is required." },
         { status: 400 }
       );
@@ -50,12 +62,12 @@ export async function POST(request) {
 
     if (error) {
       const mapped = mapLoginError(error.message);
-      return NextResponse.json({ error: mapped.error }, { status: mapped.status });
+      return jsonWithClearedAuthCookie({ error: mapped.error }, { status: mapped.status });
     }
 
     const token = data.session?.access_token;
     if (!token) {
-      return NextResponse.json(
+      return jsonWithClearedAuthCookie(
         { error: "Login succeeded, but no session token was returned." },
         { status: 401 }
       );
@@ -83,7 +95,7 @@ export async function POST(request) {
     return response;
   } catch (err) {
     console.error("Login route error:", err);
-    return NextResponse.json(
+    return jsonWithClearedAuthCookie(
       { error: "Internal Server Error within Auth endpoint: " + err.message },
       { status: 500 }
     );

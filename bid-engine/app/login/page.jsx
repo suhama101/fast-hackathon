@@ -5,8 +5,8 @@ import Link from "next/link";
 import { Cpu, Mail, Lock, CheckCircle2, AlertCircle, ArrowRight } from "lucide-react";
 
 export default function Login() {
-  const [email, setEmail] = useState("admin@bidengine.ai");
-  const [password, setPassword] = useState("developer-mode");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [msg, setMsg] = useState(null);
 
@@ -16,6 +16,9 @@ export default function Login() {
     setMsg(null);
 
     try {
+      localStorage.removeItem("bid_engine_token");
+      localStorage.removeItem("bid_engine_user_email");
+
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -27,15 +30,18 @@ export default function Login() {
         throw new Error(data.error || "Authentication failed.");
       }
 
-      if (data.token) {
-        localStorage.setItem("bid_engine_token", data.token);
+      if (!data.user?.id || !data.session?.access_token) {
+        throw new Error("Authentication failed. Supabase did not return a valid session.");
       }
 
+      localStorage.setItem("bid_engine_user_email", data.user.email || email);
       setMsg({ type: "success", text: "Successfully authenticated! Redirecting to dashboard..." });
       setTimeout(() => {
         window.location.href = "/dashboard";
       }, 1500);
     } catch (err) {
+      localStorage.removeItem("bid_engine_token");
+      localStorage.removeItem("bid_engine_user_email");
       setMsg({ type: "error", text: err.message || "Authentication failed." });
     } finally {
       setIsSubmitting(false);
