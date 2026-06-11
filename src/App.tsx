@@ -144,6 +144,11 @@ export default function App() {
   const [isPredicting, setIsPredicting] = useState(false);
   const [alert, setAlert] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
+  const getAuthHeaders = (headers: Record<string, string> = {}) => {
+    const token = localStorage.getItem("bid_engine_token");
+    return token ? { ...headers, Authorization: `Bearer ${token}` } : headers;
+  };
+
   useEffect(() => {
     if (requirements.length === 0) {
       setSelectedRequirement(null);
@@ -160,7 +165,10 @@ export default function App() {
 
     const syncSession = async () => {
       try {
-        const response = await fetch("/api/auth/me", { credentials: "include" });
+        const response = await fetch("/api/auth/me", {
+          credentials: "include",
+          headers: getAuthHeaders(),
+        });
         const data = await response.json().catch(() => ({}));
 
         if (!response.ok || !data.user?.id) {
@@ -212,6 +220,7 @@ export default function App() {
 
     const response = await fetch(`/api/workspaces?workspaceId=${encodeURIComponent(workspaceId)}`, {
       credentials: "include",
+      headers: getAuthHeaders(),
     });
     const data: any = await readApiResponse(response);
     if (!response.ok) {
@@ -237,7 +246,10 @@ export default function App() {
 
     setIsLoadingWorkspace(true);
     try {
-      const response = await fetch("/api/workspaces", { credentials: "include" });
+      const response = await fetch("/api/workspaces", {
+        credentials: "include",
+        headers: getAuthHeaders(),
+      });
       const data: any = await readApiResponse(response);
       if (!response.ok) {
         throw new Error(data.error || `Failed to load workspaces (${response.status}).`);
@@ -382,10 +394,11 @@ export default function App() {
     try {
       const response = await fetch("/api/rfp/analyze", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         credentials: "include",
         body: JSON.stringify({
           rawText: text,
+          workspaceId: meta.workspaceId || meta.workspace?.id || null,
           bidTitle: meta.fileName || currentWorkspace?.title || `RFP Workspace - ${new Date().toLocaleDateString()}`,
         }),
       });
@@ -420,7 +433,7 @@ export default function App() {
     try {
       const response = await fetch("/api/rfp/match", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         credentials: "include",
         body: JSON.stringify({
           workspaceId: currentWorkspace.id,
@@ -460,7 +473,7 @@ export default function App() {
     try {
       const response = await fetch("/api/rfp/draft", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         credentials: "include",
         body: JSON.stringify({
           workspaceId: currentWorkspace.id,
@@ -506,7 +519,7 @@ export default function App() {
     try {
       const response = await fetch("/api/rfp/score", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         credentials: "include",
         body: JSON.stringify({
           workspaceId: currentWorkspace.id,
@@ -540,7 +553,7 @@ export default function App() {
     try {
       const response = await fetch("/api/rfp/draft", {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         credentials: "include",
         body: JSON.stringify({
           draftId: activeDraft.id,

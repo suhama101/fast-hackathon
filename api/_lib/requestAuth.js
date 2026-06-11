@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from "./supabase.js";
+import { createSupabaseAuthenticatedClient } from "./supabase.js";
 
 const parseCookies = (cookieHeader = "") =>
   String(cookieHeader)
@@ -38,13 +38,27 @@ export async function requireAuthenticatedUser(req) {
     };
   }
 
-  const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase.auth.getUser(token);
+  let supabase;
+  let data;
+  let error;
+
+  try {
+    supabase = createSupabaseAuthenticatedClient(token);
+    ({ data, error } = await supabase.auth.getUser(token));
+  } catch (err) {
+    return {
+      errorResponse: {
+        status: 500,
+        body: { error: "Authentication check failed: " + (err.message || "Unable to reach Supabase Auth") },
+      },
+    };
+  }
+
   if (error || !data?.user) {
     return {
       errorResponse: {
         status: 401,
-        body: { error: "Authentication required" },
+        body: { error: "Invalid or expired session. Please sign in again." },
       },
     };
   }

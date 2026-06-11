@@ -17,6 +17,19 @@ const createServerClient = (apiKey) =>
 export const getSupabaseClient = () =>
   createServerClient(getEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"));
 
+export const createSupabaseAuthenticatedClient = (accessToken) =>
+  createClient(getEnv("NEXT_PUBLIC_SUPABASE_URL"), getEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"), {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+    global: {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  });
+
 export const getSupabaseAdmin = () =>
   createServerClient(getEnv("SUPABASE_SERVICE_ROLE_KEY"));
 
