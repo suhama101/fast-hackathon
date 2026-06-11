@@ -1,4 +1,4 @@
-import { createSupabaseAuthenticatedClient } from "./supabase.js";
+import { createSupabaseAuthenticatedClient, getSupabaseAdminOrNull } from "./supabase.js";
 
 const parseCookies = (cookieHeader = "") =>
   String(cookieHeader)
@@ -71,11 +71,31 @@ export async function requireWorkspaceOwner(req, workspaceId) {
   if (auth.errorResponse) return auth;
 
   const { supabase, user } = auth;
-  const { data: workspace, error } = await supabase
-    .from("rfp_workspaces")
-    .select("id,user_id,title,status,raw_text,file_name,created_at,updated_at")
-    .eq("id", workspaceId)
-    .maybeSingle();
+  const adminSupabase = getSupabaseAdminOrNull();
+  let workspace = null;
+  let error = null;
+
+  try {
+    ({ data: workspace, error } = await supabase
+      .from("rfp_workspaces")
+      .select("id,user_id,title,status,raw_text,file_name,created_at,updated_at")
+      .eq("id", workspaceId)
+      .maybeSingle());
+  } catch (err) {
+    error = err;
+  }
+
+  if ((!workspace || error) && adminSupabase) {
+    try {
+      ({ data: workspace, error } = await adminSupabase
+        .from("rfp_workspaces")
+        .select("id,user_id,title,status,raw_text,file_name,created_at,updated_at")
+        .eq("id", workspaceId)
+        .maybeSingle());
+    } catch (err) {
+      error = err;
+    }
+  }
 
   if (error) {
     return {
@@ -104,5 +124,5 @@ export async function requireWorkspaceOwner(req, workspaceId) {
     };
   }
 
-  return { supabase, user, workspace };
+  return { supabase, adminSupabase, user, workspace };
 }

@@ -1,6 +1,7 @@
 import { extractEntitiesFromText, mapCriteriaToTaxonomy } from "../../bid-engine/lib/datasetAnalysis.js";
 import { EVALUATION_CRITERIA_TAXONOMY } from "../../bid-engine/lib/sampleData.js";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../_lib/requestAuth.js";
+import { getSupabaseAdminOrNull } from "../_lib/supabase.js";
 
 const isUuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
@@ -131,6 +132,7 @@ export default async function handler(req, res) {
     }
 
     const { supabase, user } = auth;
+    const workspaceDb = getSupabaseAdminOrNull() || supabase;
     let workspaceId = givenWorkspaceId;
 
     const extractedData = extractHeuristicFields(rawText);
@@ -143,7 +145,7 @@ export default async function handler(req, res) {
 
     if (!workspaceId) {
       const bidTitle = givenBidTitle || `Corporate RFP Analysis Session - ${new Date().toLocaleDateString()}`;
-      const { data: newWorkspace, error: workspaceError } = await supabase
+      const { data: newWorkspace, error: workspaceError } = await workspaceDb
         .from("rfp_workspaces")
         .insert({
           user_id: user.id,
@@ -172,7 +174,7 @@ export default async function handler(req, res) {
 
     let insertedRequirements = [];
     if (rowsToInsert.length > 0) {
-      const { data: inserted, error: insertError } = await supabase
+      const { data: inserted, error: insertError } = await workspaceDb
         .from("rfp_requirements")
         .insert(rowsToInsert)
         .select();
@@ -182,7 +184,7 @@ export default async function handler(req, res) {
       }
 
       insertedRequirements = inserted || [];
-      await supabase
+      await workspaceDb
         .from("rfp_workspaces")
         .update({ status: "draft_ready", updated_at: new Date().toISOString() })
         .eq("id", workspaceId)

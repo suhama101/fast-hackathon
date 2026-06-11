@@ -1,6 +1,7 @@
 import { CAPABILITY_LIBRARY } from "../../bid-engine/lib/sampleData.js";
 import { matchRequirementToCapabilities, extractEntitiesFromText } from "../../bid-engine/lib/datasetAnalysis.js";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../_lib/requestAuth.js";
+import { getSupabaseAdminOrNull } from "../_lib/supabase.js";
 
 const isUuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
@@ -49,8 +50,9 @@ export default async function handler(req, res) {
       const ownership = await requireWorkspaceOwner(req, workspaceId);
       if (ownership.errorResponse) return res.status(ownership.errorResponse.status).json(ownership.errorResponse.body);
 
-      const { supabase } = ownership;
-      const { data: drafts, error } = await supabase
+      const { supabase, user } = ownership;
+      const workspaceDb = getSupabaseAdminOrNull() || supabase;
+      const { data: drafts, error } = await workspaceDb
         .from("proposal_drafts")
         .select("*")
         .eq("workspace_id", workspaceId)
@@ -75,8 +77,9 @@ export default async function handler(req, res) {
       const ownership = await requireWorkspaceOwner(req, workspaceId);
       if (ownership.errorResponse) return res.status(ownership.errorResponse.status).json(ownership.errorResponse.body);
 
-      const { supabase } = ownership;
-      const { data: requirements, error: reqError } = await supabase
+      const { supabase, user } = ownership;
+      const workspaceDb = getSupabaseAdminOrNull() || supabase;
+      const { data: requirements, error: reqError } = await workspaceDb
         .from("rfp_requirements")
         .select("*")
         .eq("workspace_id", workspaceId);
@@ -102,9 +105,10 @@ export default async function handler(req, res) {
         requirements.map((req) => req.requirement_text).join("\n")
       );
 
-      const { data: capabilities, error: capError } = await supabase
+      const { data: capabilities, error: capError } = await workspaceDb
         .from("capability_library")
-        .select("*");
+        .select("*")
+        .eq("user_id", user.id);
       const capabilitySource = !capError && capabilities?.length
         ? capabilities
         : CAPABILITY_LIBRARY.map((item) => ({
@@ -128,7 +132,7 @@ export default async function handler(req, res) {
         return draftFromTarget(target, capability, extractedEntities);
       });
 
-      await supabase.from("proposal_drafts").delete().eq("workspace_id", workspaceId);
+      await workspaceDb.from("proposal_drafts").delete().eq("workspace_id", workspaceId);
 
       const insertRows = draftsList.map((item) => ({
         workspace_id: workspaceId,
@@ -138,7 +142,7 @@ export default async function handler(req, res) {
       }));
 
       if (insertRows.length > 0) {
-        const { data: insertedDrafts, error: draftsError } = await supabase
+        const { data: insertedDrafts, error: draftsError } = await workspaceDb
           .from("proposal_drafts")
           .insert(insertRows)
           .select();
@@ -189,7 +193,8 @@ export default async function handler(req, res) {
       const ownership = await requireWorkspaceOwner(req, draftRow.workspace_id);
       if (ownership.errorResponse) return res.status(ownership.errorResponse.status).json(ownership.errorResponse.body);
 
-      const { data, error } = await supabase
+      const workspaceDb = getSupabaseAdminOrNull() || supabase;
+      const { data, error } = await workspaceDb
         .from("proposal_drafts")
         .update({
           content: String(content || ""),

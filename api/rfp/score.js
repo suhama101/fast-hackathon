@@ -1,6 +1,7 @@
 import { calculateWinScore } from "../../bid-engine/lib/datasetAnalysis.js";
 import { CAPABILITY_LIBRARY, BID_HISTORY } from "../../bid-engine/lib/sampleData.js";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../_lib/requestAuth.js";
+import { getSupabaseAdminOrNull } from "../_lib/supabase.js";
 
 const isUuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
@@ -38,6 +39,7 @@ export default async function handler(req, res) {
     if (auth.errorResponse) return res.status(auth.errorResponse.status).json(auth.errorResponse.body);
 
     const { supabase, user } = auth;
+    const workspaceDb = getSupabaseAdminOrNull() || supabase;
     let mode = "dataset";
     let requirements = [];
     let bidHistory = [];
@@ -49,11 +51,11 @@ export default async function handler(req, res) {
       if (ownership.errorResponse) return res.status(ownership.errorResponse.status).json(ownership.errorResponse.body);
 
       const [{ data: dbRequirements, error: reqError }, { data: workspace, error: workspaceError }] = await Promise.all([
-        supabase
+        workspaceDb
           .from("rfp_requirements")
           .select("*")
           .eq("workspace_id", workspaceId),
-        supabase
+        workspaceDb
           .from("rfp_workspaces")
           .select("raw_text")
           .eq("id", workspaceId)
@@ -73,8 +75,8 @@ export default async function handler(req, res) {
     }
 
     const [{ data: dbHistory, error: historyError }, { data: dbCapabilities, error: capError }] = await Promise.all([
-      supabase.from("bid_history").select("*"),
-      supabase.from("capability_library").select("*"),
+      workspaceDb.from("bid_history").select("*"),
+      workspaceDb.from("capability_library").select("*").eq("user_id", user.id),
     ]);
 
     if (!historyError && dbHistory?.length) bidHistory = dbHistory;
@@ -127,7 +129,7 @@ export default async function handler(req, res) {
 
     let record = null;
     if (workspaceId && isUuid(workspaceId)) {
-      const { data: savedScore, error: dbError } = await supabase
+      const { data: savedScore, error: dbError } = await workspaceDb
         .from("win_scores")
         .upsert({
           workspace_id: workspaceId,

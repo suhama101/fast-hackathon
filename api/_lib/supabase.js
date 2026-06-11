@@ -33,4 +33,12 @@ export const createSupabaseAuthenticatedClient = (accessToken) =>
 export const getSupabaseAdmin = () =>
   createServerClient(getEnv("SUPABASE_SERVICE_ROLE_KEY"));
 
+export const getSupabaseAdminOrNull = () => {
+  try {
+    return getSupabaseAdmin();
+  } catch {
+    return null;
+  }
+};
+
 export default getSupabaseClient;

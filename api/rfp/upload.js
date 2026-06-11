@@ -1,5 +1,6 @@
 import { extractTextFromFile } from "../../bid-engine/lib/pdfParser.js";
 import { requireAuthenticatedUser } from "../_lib/requestAuth.js";
+import { getSupabaseAdminOrNull } from "../_lib/supabase.js";
 
 export const config = {
   api: {
@@ -222,6 +223,7 @@ export default async function handler(req, res) {
     }
 
     const { supabase, user } = auth;
+    const workspaceDb = getSupabaseAdminOrNull() || supabase;
     const { fields, file } = await readUpload(req);
 
     if (!file?.buffer?.length) {
@@ -250,7 +252,7 @@ export default async function handler(req, res) {
       return errorResponse(res, 400, "File appears to be empty or could not be read properly.");
     }
 
-    const { data: workspace, error: workspaceError } = await supabase
+    const { data: workspace, error: workspaceError } = await workspaceDb
       .from("rfp_workspaces")
       .insert({
         user_id: user.id,

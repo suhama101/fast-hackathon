@@ -1,4 +1,5 @@
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "./_lib/requestAuth.js";
+import { getSupabaseAdminOrNull } from "./_lib/supabase.js";
 
 const isUuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
@@ -34,6 +35,7 @@ export default async function handler(req, res) {
       }
 
       const { supabase, user } = auth;
+      const workspaceDb = getSupabaseAdminOrNull() || supabase;
       const requestedWorkspaceId = getQueryValue(req, "workspaceId") || getQueryValue(req, "id");
 
       if (requestedWorkspaceId) {
@@ -51,17 +53,17 @@ export default async function handler(req, res) {
           { data: drafts, error: draftsError },
           { data: score, error: scoreError },
         ] = await Promise.all([
-          supabase
+          workspaceDb
             .from("rfp_requirements")
             .select("*")
             .eq("workspace_id", requestedWorkspaceId)
             .order("created_at", { ascending: true }),
-          supabase
+          workspaceDb
             .from("proposal_drafts")
             .select("*")
             .eq("workspace_id", requestedWorkspaceId)
             .order("created_at", { ascending: true }),
-          supabase
+          workspaceDb
             .from("win_scores")
             .select("*")
             .eq("workspace_id", requestedWorkspaceId)
@@ -82,7 +84,7 @@ export default async function handler(req, res) {
         });
       }
 
-      const { data, error } = await supabase
+      const { data, error } = await workspaceDb
         .from("rfp_workspaces")
         .select("*")
         .eq("user_id", user.id)
@@ -105,6 +107,7 @@ export default async function handler(req, res) {
       }
 
       const { supabase, user } = auth;
+      const workspaceDb = getSupabaseAdminOrNull() || supabase;
       const body = readBody(req);
       const title = String(body.title || "").trim() || `RFP Workspace - ${new Date().toLocaleDateString()}`;
       const rawText = String(body.rawText || "");
@@ -118,7 +121,7 @@ export default async function handler(req, res) {
         file_name: fileName,
       };
 
-      const { data, error } = await supabase
+      const { data, error } = await workspaceDb
         .from("rfp_workspaces")
         .insert(payload)
         .select()
@@ -140,6 +143,7 @@ export default async function handler(req, res) {
       }
 
       const { supabase, user } = auth;
+      const workspaceDb = getSupabaseAdminOrNull() || supabase;
       const body = readBody(req);
       if (!isUuid(body.workspaceId)) {
         return res.status(400).json({ error: "A valid workspaceId UUID is required." });
@@ -157,7 +161,7 @@ export default async function handler(req, res) {
       if (body.fileName !== undefined) update.file_name = String(body.fileName || "").trim() || null;
       update.updated_at = new Date().toISOString();
 
-      const { data, error } = await supabase
+      const { data, error } = await workspaceDb
         .from("rfp_workspaces")
         .update(update)
         .eq("id", body.workspaceId)

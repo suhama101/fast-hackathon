@@ -1,6 +1,7 @@
 import { matchRequirementToCapabilities } from "../../bid-engine/lib/datasetAnalysis.js";
 import { CAPABILITY_LIBRARY } from "../../bid-engine/lib/sampleData.js";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../_lib/requestAuth.js";
+import { getSupabaseAdminOrNull } from "../_lib/supabase.js";
 
 const isUuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
@@ -36,7 +37,8 @@ export default async function handler(req, res) {
     const auth = await requireAuthenticatedUser(req);
     if (auth.errorResponse) return res.status(auth.errorResponse.status).json(auth.errorResponse.body);
 
-    const { supabase } = auth;
+    const { supabase, user } = auth;
+    const workspaceDb = getSupabaseAdminOrNull() || supabase;
     let mode = "dataset";
     let requirements = [];
     let capabilities = [];
@@ -45,7 +47,7 @@ export default async function handler(req, res) {
       const ownership = await requireWorkspaceOwner(req, workspaceId);
       if (ownership.errorResponse) return res.status(ownership.errorResponse.status).json(ownership.errorResponse.body);
 
-      const { data: dbRequirements, error: reqError } = await supabase
+      const { data: dbRequirements, error: reqError } = await workspaceDb
         .from("rfp_requirements")
         .select("*")
         .eq("workspace_id", workspaceId);
@@ -69,9 +71,10 @@ export default async function handler(req, res) {
       });
     }
 
-    const { data: dbCapabilities, error: capError } = await supabase
+    const { data: dbCapabilities, error: capError } = await workspaceDb
       .from("capability_library")
-      .select("*");
+      .select("*")
+      .eq("user_id", user.id);
 
     if (!capError && dbCapabilities?.length) {
       capabilities = dbCapabilities;
@@ -124,7 +127,7 @@ export default async function handler(req, res) {
 
     if (workspaceId && isUuid(workspaceId)) {
       await Promise.all(matches.map((match) =>
-        supabase
+        workspaceDb
           .from("rfp_requirements")
           .update({
             compliance_status: match.compliance_status,
