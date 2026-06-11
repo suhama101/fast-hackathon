@@ -1,5 +1,4 @@
 import { Groq } from "groq-sdk";
-import "./envConfig";
 
 /**
  * Instantiates the Groq client securely using server-side environment variables.

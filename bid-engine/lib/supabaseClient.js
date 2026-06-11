@@ -1,19 +1,22 @@
 import { createClient } from "@supabase/supabase-js";
-import "./envConfig";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://your-project.supabase.co";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "your-anon-key";
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-// Standard client browser-safe context
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error("Missing Supabase environment variables");
+}
 
-/**
- * Accesses Supabase with admin bypass permissions (Server-only context)
- */
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: { persistSession: false },
+});
+
 export const getSupabaseAdmin = () => {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!serviceKey) {
-    console.warn("SUPABASE_SERVICE_ROLE_KEY is not configured.");
-  }
-  return createClient(supabaseUrl, serviceKey || supabaseAnonKey);
+  if (!serviceKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY is required");
+  return createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false },
+  });
 };
+
+export default supabase;

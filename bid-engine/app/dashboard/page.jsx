@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Navbar from "../../components/Navbar";
 import FileUpload from "../../components/FileUpload";
 import RequirementsList from "../../components/RequirementsList";
@@ -28,9 +29,11 @@ import {
 } from "lucide-react";
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState("upload");
   const [userEmail, setUserEmail] = useState("expert@bidengine.ai");
-  const [isAuthenticated, setIsAuthenticated] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Workspace tracking state
   const [workspaces, setWorkspaces] = useState([]);
@@ -56,6 +59,18 @@ export default function DashboardPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [isPredicting, setIsPredicting] = useState(false);
   const [alert, setAlert] = useState(null);
+
+  useEffect(() => {
+    const token = localStorage.getItem("bid_engine_token") ||
+                  document.cookie.includes("sb-access-token") ||
+                  document.cookie.includes("bid_engine_token");
+    if (!token) {
+      router.push("/login");
+      return;
+    }
+    setIsAuthenticated(true);
+    setIsLoading(false);
+  }, [router]);
 
   const mapWorkspace = (workspace) => ({
     id: workspace.id,
@@ -106,8 +121,10 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    loadWorkspaces();
-  }, []);
+    if (isAuthenticated) {
+      loadWorkspaces();
+    }
+  }, [isAuthenticated]);
 
   // Sync draft edit input
   useEffect(() => {
@@ -433,6 +450,9 @@ export default function DashboardPage() {
   // Calculate compliance statistics
   const compliancePassCount = requirements.filter(req => req.status === "pass").length;
   const complianceScorePercent = Math.round((compliancePassCount / requirements.length) * 100) || 75;
+
+  if (isLoading) return <div>Loading...</div>;
+  if (!isAuthenticated) return null;
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-slate-100 flex flex-col" id="dashboard-system">

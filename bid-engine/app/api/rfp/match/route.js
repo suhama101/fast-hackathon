@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { getSupabaseAdmin } from "../../../../lib/supabaseClient";
 import { loadHackathonDataset } from "../../../../lib/datasetLoader";
 import { matchRequirementToCapabilities } from "../../../../lib/datasetAnalysis";
+import { requireAuthenticatedUser, requireWorkspaceOwner } from "../../../../lib/requestAuth";
 
 const isUuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
@@ -16,12 +16,18 @@ const normalizeRequirement = (req, index = 0) => ({
 export async function POST(request) {
   try {
     const { workspaceId, requirements: clientRequirements = [], entities: clientEntities = null } = await request.json();
-    const supabase = getSupabaseAdmin();
+    const auth = await requireAuthenticatedUser(request);
+    if (auth.errorResponse) return auth.errorResponse;
+
+    const { supabase } = auth;
     let mode = "dataset";
     let requirements = [];
     let capabilities = [];
 
     if (workspaceId && isUuid(workspaceId)) {
+      const ownership = await requireWorkspaceOwner(request, workspaceId);
+      if (ownership.errorResponse) return ownership.errorResponse;
+
       const { data: dbRequirements, error: reqError } = await supabase
         .from("rfp_requirements")
         .select("*")

@@ -16,7 +16,6 @@ export default function Login() {
     setMsg(null);
 
     try {
-      // Fetch mock or absolute API login routes
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -28,17 +27,16 @@ export default function Login() {
         throw new Error(data.error || "Authentication failed.");
       }
 
+      if (data.token) {
+        localStorage.setItem("bid_engine_token", data.token);
+      }
+
       setMsg({ type: "success", text: "Successfully authenticated! Redirecting to dashboard..." });
       setTimeout(() => {
         window.location.href = "/dashboard";
       }, 1500);
     } catch (err) {
-      console.warn("API direct call failed, activating dev-bypass redirect:", err.message);
-      // Failover bypass to ensure developers can access UI even without configured Supabase keys!
-      setMsg({ type: "success", text: "Local Sandbox Mode Activated. Proceeding to Dashboard..." });
-      setTimeout(() => {
-        window.location.href = "/dashboard?demo=true&user=" + encodeURIComponent(email);
-      }, 1500);
+      setMsg({ type: "error", text: err.message || "Authentication failed." });
     } finally {
       setIsSubmitting(false);
     }

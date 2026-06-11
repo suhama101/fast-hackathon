@@ -1,0 +1,85 @@
+Request for Proposal - Enterprise IT Support Services
+Organization: Government of Pakistan - Ministry of IT
+Reference: MOIT-ITSS-2026-12
+
+1. Background and Objective
+The Government of Pakistan - Ministry of IT invites qualified technology service
+providers to submit proposals for enterprise IT support services across ministry
+offices in Islamabad, Lahore, Karachi, Peshawar, and Quetta. The selected vendor
+will provide managed service desk support, endpoint management, network
+monitoring, cybersecurity operations, cloud administration, and incident response
+services for a period of three years.
+
+The objective is to improve uptime, reduce incident response time, standardize
+support procedures, and strengthen the security posture of government digital
+services. The vendor must demonstrate experience supporting public-sector,
+high-availability environments with strict confidentiality and reporting
+requirements.
+
+2. Scope of Services
+The successful bidder shall provide:
+- Tier 1, Tier 2, and Tier 3 helpdesk support for approximately 4,500 users.
+- 24x7 network and server monitoring with monthly executive reporting.
+- Endpoint patching, antivirus management, and asset inventory updates.
+- Firewall, VPN, email security, and identity access support.
+- Cloud infrastructure support for Microsoft Azure and AWS workloads.
+- Incident response procedures for malware, unauthorized access, and data loss.
+- Knowledge base development and staff training sessions.
+
+3. Mandatory Requirements
+- Bidder must be registered with SECP or an equivalent authority.
+- Bidder must have at least five years of enterprise IT managed services experience.
+- Bidder must provide evidence of at least three similar government or regulated-sector projects.
+- Bidder must maintain ISO 27001 certification or equivalent information security accreditation.
+- Bidder must provide SOC 2 Type II, ISO 20000, ITIL, or comparable service management evidence.
+- Bidder must guarantee 99.9 percent service desk availability and 99.5 percent monitoring platform availability.
+- Critical incidents must receive response within 30 minutes and resolution plan within 4 hours.
+- Bidder must provide named project manager, service delivery manager, and cybersecurity lead.
+- All staff working on ministry systems must sign confidentiality and data protection undertakings.
+- Data must remain within approved ministry or government-authorized cloud environments.
+
+4. Evaluation Criteria
+Proposals will be evaluated using the following weights:
+- Technical approach and service delivery model: 30 percent
+- Relevant public-sector experience and past performance: 20 percent
+- Security certifications and compliance controls: 20 percent
+- Staffing plan and escalation model: 10 percent
+- Financial proposal and value for money: 20 percent
+
+5. Budget and Contract Value
+The estimated budget range for this procurement is PKR 50M to PKR 80M for the
+initial three-year contract period. The financial proposal must provide annual
+service fees, one-time transition costs, optional add-ons, and applicable taxes.
+
+6. Submission Deadline
+Complete technical and financial proposals must be submitted no later than
+15 December 2026 at 3:00 PM Pakistan Standard Time. Questions must be submitted
+by 30 November 2026. Responses to bidder questions will be issued by
+5 December 2026.
+
+7. Required Certifications and Legal Clauses
+- ISO 27001 or equivalent information security certification.
+- ITIL Foundation or higher certification for service management staff.
+- PEC or PTA registrations where applicable for network services.
+- Compliance with Pakistan data protection, cybercrime, procurement, and public
+  records requirements.
+- Non-disclosure agreement and conflict-of-interest declaration.
+- Tax registration, active taxpayer status, and audited financial statements.
+
+8. Questions to Answer
+1. Describe your proposed service desk operating model, ticket classification,
+   escalation paths, and SLA reporting process.
+2. Provide three examples of comparable enterprise IT support projects, including
+   contract value, duration, client type, and measurable outcomes.
+3. Explain your cybersecurity monitoring, incident response, and evidence
+   preservation procedures.
+4. Describe how your team will transition from the incumbent provider without
+   disrupting ministry operations.
+5. Provide a detailed pricing schedule showing recurring service fees, transition
+   costs, optional tools, taxes, and discounts.
+
+9. Submission Format
+Bidders must submit a signed technical proposal, financial proposal, compliance
+checklist, company profile, team CVs, certifications, project references, and
+acceptance of contract terms. Proposals that omit mandatory documents may be
+declared non-responsive.

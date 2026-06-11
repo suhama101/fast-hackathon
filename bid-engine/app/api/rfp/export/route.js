@@ -11,7 +11,7 @@ import {
   TextRun,
   WidthType,
 } from "docx";
-import { getSupabaseAdmin } from "../../../../lib/supabaseClient";
+import { requireWorkspaceOwner } from "../../../../lib/requestAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +58,10 @@ export async function GET(request) {
       );
     }
 
-    const supabase = getSupabaseAdmin();
+    const ownership = await requireWorkspaceOwner(request, workspaceId);
+    if (ownership.errorResponse) return ownership.errorResponse;
+
+    const { supabase } = ownership;
     const [
       { data: workspace, error: workspaceError },
       { data: drafts, error: draftsError },

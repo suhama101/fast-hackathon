@@ -3,12 +3,31 @@
 import React, { useState } from "react";
 import { UploadCloud, FileText, CheckCircle, AlertCircle, ArrowRight, Loader } from "lucide-react";
 
+const SAMPLE_RFPS = [
+  {
+    label: "IT Services",
+    fileName: "rfp-it-services.txt",
+    path: "/sample-rfps/rfp-it-services.txt",
+  },
+  {
+    label: "Construction",
+    fileName: "rfp-construction.txt",
+    path: "/sample-rfps/rfp-construction.txt",
+  },
+  {
+    label: "Logistics",
+    fileName: "rfp-logistics.txt",
+    path: "/sample-rfps/rfp-logistics.txt",
+  },
+];
+
 export default function FileUpload({ onTextParsed, isProcessing, initialText = "" }) {
   const [dragActive, setDragActive] = useState(false);
   const [rfpText, setRfpText] = useState(initialText);
   const [alertMsg, setAlertMsg] = useState(null);
   const [fileName, setFileName] = useState("");
   const [progress, setProgress] = useState(0);
+  const [selectedSampleRfp, setSelectedSampleRfp] = useState(SAMPLE_RFPS[0].path);
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -100,37 +119,26 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
     onTextParsed(rfpText);
   };
 
-  const loadExampleRfp = () => {
-    const example = `REQUEST FOR PROPOSAL - GLOBAL DATA HARMONIZATION PIPELINE
+  const loadSampleRfp = async () => {
+    const sample = SAMPLE_RFPS.find((item) => item.path === selectedSampleRfp) || SAMPLE_RFPS[0];
+    setAlertMsg(null);
+    setProgress(30);
 
-1. MANDATORY CLINICAL REQUIREMENTS
-- Proposed technical pipeline MUST hold verified SOC 2 Type II audit certifications.
-- Must execute TLS 1.3 encryption on all rest and transit operations.
-- Candidate database layer MUST guarantee 99.99% operational uptime SLAs.
-
-2. EVALUATION WEIGHTS
-- Technical Compliance Criteria: 45% Weight metrics.
-- Security SLA Support: 35% Weight metrics.
-- Pricing Competitiveness: 20% Weight metrics.
-
-3. TIMELINE & DEADLINES
-Submission deadline is fixed for July 25, 2026.
-
-4. TARGET ESTIMATE BUDGET
-Target procurement budget holds a hard boundary limit of $250,000 for annual licensing operations.
-
-5. RESPONSE PROTOCOL QUESTIONS
-- Question A: Describe your SOC 2 audit assurance scope and active certificate dates.
-- Question B: How does your database handle network partitions and automated failover?
-- Question C: Outline your commercial pricing tiers and any long-term license volume discounts.
-`;
-    setFileName("global-tender-sow.docx");
-    setRfpText(example);
-    setProgress(100);
-    setAlertMsg({
-      type: "success",
-      text: "Loaded sample RFP specifications! Click 'Analyze RFP' to trigger AI evaluation."
-    });
+    try {
+      const response = await fetch(sample.path);
+      if (!response.ok) throw new Error("Sample RFP file could not be loaded.");
+      const text = await response.text();
+      setFileName(sample.fileName);
+      setRfpText(text);
+      setProgress(100);
+      setAlertMsg({
+        type: "success",
+        text: `Loaded "${sample.fileName}". Click "Analyze RFP" to trigger AI evaluation.`
+      });
+    } catch (err) {
+      setProgress(0);
+      setAlertMsg({ type: "error", text: err.message || "Failed to load sample RFP." });
+    }
   };
 
   return (
@@ -145,9 +153,20 @@ Target procurement budget holds a hard boundary limit of $250,000 for annual lic
             Drag and drop your RFP specifications or paste plain-text content to run AI parsing.
           </p>
         </div>
-        <div>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <select
+            value={selectedSampleRfp}
+            onChange={(e) => setSelectedSampleRfp(e.target.value)}
+            className="px-3 py-1.5 bg-[#0a0a0f] border border-purple-950/50 text-purple-300 text-xs font-mono rounded focus:outline-none focus:border-purple-500"
+          >
+            {SAMPLE_RFPS.map((sample) => (
+              <option key={sample.path} value={sample.path}>
+                {sample.label}
+              </option>
+            ))}
+          </select>
           <button
-            onClick={loadExampleRfp}
+            onClick={loadSampleRfp}
             className="px-3.5 py-1.5 bg-[#0a0a0f] border border-purple-950/50 hover:border-purple-500 text-purple-350 hover:text-purple-300 text-xs font-mono font-medium rounded transition"
           >
             Load Sample RFP

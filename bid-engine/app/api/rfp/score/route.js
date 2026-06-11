@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { getSupabaseAdmin } from "../../../../lib/supabaseClient";
 import { loadHackathonDataset } from "../../../../lib/datasetLoader";
 import { calculateWinScore } from "../../../../lib/datasetAnalysis";
+import { requireAuthenticatedUser, requireWorkspaceOwner } from "../../../../lib/requestAuth";
 
 const isUuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
@@ -17,7 +17,10 @@ const normalizeRequirement = (req, index = 0) => ({
 export async function POST(request) {
   try {
     const { workspaceId, requirements: clientRequirements = [], rawText = "" } = await request.json();
-    const supabase = getSupabaseAdmin();
+    const auth = await requireAuthenticatedUser(request);
+    if (auth.errorResponse) return auth.errorResponse;
+
+    const { supabase, user } = auth;
     let mode = "dataset";
     let requirements = [];
     let bidHistory = [];
@@ -25,6 +28,9 @@ export async function POST(request) {
     let workspaceRawText = "";
 
     if (workspaceId && isUuid(workspaceId)) {
+      const ownership = await requireWorkspaceOwner(request, workspaceId);
+      if (ownership.errorResponse) return ownership.errorResponse;
+
       const [{ data: dbRequirements, error: reqError }, { data: workspace, error: workspaceError }] = await Promise.all([
         supabase
           .from("rfp_requirements")
@@ -34,6 +40,7 @@ export async function POST(request) {
           .from("rfp_workspaces")
           .select("raw_text")
           .eq("id", workspaceId)
+          .eq("user_id", user.id)
           .maybeSingle(),
       ]);
       if (reqError) throw reqError;

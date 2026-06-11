@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { analyzeWithGroq } from "../../../../lib/groqClient";
 import { getSupabaseAdmin } from "../../../../lib/supabaseClient";
+import { requireWorkspaceOwner } from "../../../../lib/requestAuth";
 
 const isUuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
@@ -17,7 +18,10 @@ export async function GET(request) {
       );
     }
 
-    const supabase = getSupabaseAdmin();
+    const ownership = await requireWorkspaceOwner(request, workspaceId);
+    if (ownership.errorResponse) return ownership.errorResponse;
+
+    const { supabase } = ownership;
     const { data: drafts, error } = await supabase
       .from("proposal_drafts")
       .select("*")
@@ -51,7 +55,10 @@ export async function POST(request) {
       );
     }
 
-    const supabase = getSupabaseAdmin();
+    const ownership = await requireWorkspaceOwner(request, workspaceId);
+    if (ownership.errorResponse) return ownership.errorResponse;
+
+    const { supabase } = ownership;
 
     // 1. Fetch requirements for this workspace to identify what questions or sections need responses
     const { data: requirements, error: reqError } = await supabase
@@ -214,6 +221,23 @@ export async function PATCH(request) {
       : "edited";
 
     const supabase = getSupabaseAdmin();
+    const { data: draftRow, error: draftLookupError } = await supabase
+      .from("proposal_drafts")
+      .select("workspace_id")
+      .eq("id", draftId)
+      .maybeSingle();
+
+    if (draftLookupError) throw draftLookupError;
+    if (!draftRow?.workspace_id) {
+      return NextResponse.json(
+        { error: "Draft not found." },
+        { status: 404 }
+      );
+    }
+
+    const ownership = await requireWorkspaceOwner(request, draftRow.workspace_id);
+    if (ownership.errorResponse) return ownership.errorResponse;
+
     const { data, error } = await supabase
       .from("proposal_drafts")
       .update({

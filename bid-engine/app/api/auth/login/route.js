@@ -1,37 +1,86 @@
 import { NextResponse } from "next/server";
-import { supabase } from "../../../../lib/supabaseClient";
+import { getSupabaseAdmin } from "../../../../lib/supabaseClient";
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+
+const mapLoginError = (message = "") => {
+  const text = String(message || "");
+  if (/rate limit|too many requests/i.test(text)) {
+    return { status: 429, error: "Supabase rate limit exceeded. Please wait and try again." };
+  }
+  if (/invalid login credentials|invalid credentials/i.test(text)) {
+    return { status: 401, error: "Invalid email or password." };
+  }
+  if (/email not confirmed/i.test(text)) {
+    return { status: 401, error: "Please confirm your email address before logging in." };
+  }
+  return { status: 401, error: text || "Login failed." };
+};
 
 /**
  * Handles credentials-based user logging inside BidEngine AI
  */
 export async function POST(request) {
   try {
-    const { email, password } = await request.json();
+    const payload = await request.json();
+    const email = normalizeEmail(payload.email);
+    const password = String(payload.password || "");
 
-    if (!email || !password) {
+    if (!email || !EMAIL_REGEX.test(email)) {
       return NextResponse.json(
-        { error: "Email and password are required credentials." },
+        { error: "Please enter a valid email address." },
         { status: 400 }
       );
     }
 
+    if (!password) {
+      return NextResponse.json(
+        { error: "Password is required." },
+        { status: 400 }
+      );
+    }
+
+    const supabase = getSupabaseAdmin();
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 401 });
+      const mapped = mapLoginError(error.message);
+      return NextResponse.json({ error: mapped.error }, { status: mapped.status });
     }
 
-    return NextResponse.json(
-      { 
-        message: "Login successful", 
-        user: data.user, 
-        session: data.session 
-      }, 
+    const token = data.session?.access_token;
+    if (!token) {
+      return NextResponse.json(
+        { error: "Login succeeded, but no session token was returned." },
+        { status: 401 }
+      );
+    }
+
+    const response = NextResponse.json(
+      {
+        success: true,
+        message: "Login successful",
+        user: data.user,
+        token,
+        session: data.session,
+      },
       { status: 200 }
     );
+
+    response.cookies.set("bid_engine_token", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 7,
+      path: "/",
+    });
+
+    return response;
   } catch (err) {
     console.error("Login route error:", err);
     return NextResponse.json(

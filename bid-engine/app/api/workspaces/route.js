@@ -1,15 +1,19 @@
 import { NextResponse } from "next/server";
-import { getSupabaseAdmin } from "../../../lib/supabaseClient";
+import { requireAuthenticatedUser, requireWorkspaceOwner } from "../../../lib/requestAuth";
 
 const isUuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
 
-export async function GET() {
+export async function GET(request) {
   try {
-    const supabase = getSupabaseAdmin();
+    const auth = await requireAuthenticatedUser(request);
+    if (auth.errorResponse) return auth.errorResponse;
+
+    const { supabase, user } = auth;
     const { data, error } = await supabase
       .from("rfp_workspaces")
       .select("*")
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(25);
 
@@ -33,13 +37,17 @@ export async function GET() {
 
 export async function POST(request) {
   try {
+    const auth = await requireAuthenticatedUser(request);
+    if (auth.errorResponse) return auth.errorResponse;
+
+    const { supabase, user } = auth;
     const body = await request.json();
     const title = String(body.title || "").trim() || `RFP Workspace - ${new Date().toLocaleDateString()}`;
     const rawText = String(body.rawText || "");
     const fileName = String(body.fileName || "").trim() || null;
 
-    const supabase = getSupabaseAdmin();
     const payload = {
+      user_id: user.id,
       title,
       status: body.status || "analyzing",
       raw_text: rawText || null,
@@ -71,10 +79,17 @@ export async function POST(request) {
 
 export async function PATCH(request) {
   try {
+    const auth = await requireAuthenticatedUser(request);
+    if (auth.errorResponse) return auth.errorResponse;
+
+    const { supabase, user } = auth;
     const body = await request.json();
     if (!isUuid(body.workspaceId)) {
       return NextResponse.json({ error: "A valid workspaceId UUID is required." }, { status: 400 });
     }
+
+    const workspaceCheck = await requireWorkspaceOwner(request, body.workspaceId);
+    if (workspaceCheck.errorResponse) return workspaceCheck.errorResponse;
 
     const update = {};
     if (body.title !== undefined) update.title = String(body.title || "").trim();
@@ -83,11 +98,11 @@ export async function PATCH(request) {
     if (body.fileName !== undefined) update.file_name = String(body.fileName || "").trim() || null;
     update.updated_at = new Date().toISOString();
 
-    const supabase = getSupabaseAdmin();
     const { data, error } = await supabase
       .from("rfp_workspaces")
       .update(update)
       .eq("id", body.workspaceId)
+      .eq("user_id", user.id)
       .select()
       .single();
 
