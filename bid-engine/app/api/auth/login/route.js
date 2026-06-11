@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
+
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
 export async function POST(request) {
   try {
     const { email: rawEmail, password: rawPassword } = await request.json();
-    const email = String(rawEmail || "").toLowerCase().trim();
+    const email = normalizeEmail(rawEmail);
     const password = String(rawPassword || "");
 
     if (!email || !password) {
@@ -17,71 +17,66 @@ export async function POST(request) {
     }
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const jwtSecret = process.env.JWT_SECRET || process.env.SUPABASE_JWT_SECRET;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-    if (!supabaseUrl || !serviceKey) {
+    if (!supabaseUrl || !anonKey) {
       return NextResponse.json(
         { error: "Server configuration error" },
         { status: 500 }
       );
     }
 
-    const supabase = createClient(supabaseUrl, serviceKey, {
-      auth: { persistSession: false },
+    const supabase = createClient(supabaseUrl, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const { data: user, error: fetchError } = await supabase
-      .from("users")
-      .select("*")
-      .eq("email", email)
-      .single();
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-    if (fetchError || !user) {
+    if (error || !data?.session || !data?.user) {
       return NextResponse.json(
         { error: "Invalid email or password" },
         { status: 401 }
       );
     }
 
-    const passwordMatch = await bcrypt.compare(password, user.password_hash);
-
-    if (!passwordMatch) {
-      return NextResponse.json(
-        { error: "Invalid email or password" },
-        { status: 401 }
-      );
-    }
-
-    const token = jwt.sign(
-      {
-        userId: user.id,
-        email: user.email,
-        role: user.role,
-        fullName: user.full_name,
-      },
-      jwtSecret || "fallback_secret_change_in_production",
-      { expiresIn: "7d" }
-    );
+    const { access_token: accessToken, refresh_token: refreshToken } = data.session;
 
     const response = NextResponse.json({
       success: true,
-      token,
+      token: accessToken,
+      session: data.session,
       user: {
-        id: user.id,
-        email: user.email,
-        fullName: user.full_name,
-        role: user.role,
+        id: data.user.id,
+        email: data.user.email,
+        fullName:
+          data.user.user_metadata?.full_name ||
+          data.user.user_metadata?.display_name ||
+          data.user.user_metadata?.name ||
+          null,
+        role: data.user.user_metadata?.role || data.user.app_metadata?.role || "recruiter",
       },
     });
 
-    response.cookies.set("bid_engine_token", token, {
+    response.cookies.set("bid_engine_token", accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: 60 * 60 * 24 * 7,
       path: "/",
     });
+
+    if (refreshToken) {
+      response.cookies.set("bid_engine_refresh_token", refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 7,
+        path: "/",
+      });
+    }
 
     return response;
   } catch (error) {

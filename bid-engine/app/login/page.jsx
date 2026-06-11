@@ -32,11 +32,12 @@ export default function Login() {
         throw new Error(data.error || "Authentication failed.");
       }
 
-      if (!data.token) {
+      const accessToken = data.session?.access_token || data.token;
+      if (!accessToken) {
         throw new Error("Authentication failed. No token was returned.");
       }
 
-      localStorage.setItem("bid_engine_token", data.token);
+      localStorage.setItem("bid_engine_token", accessToken);
       localStorage.setItem("bid_engine_user_email", data.user?.email || email);
       router.push("/dashboard");
     } catch (err) {

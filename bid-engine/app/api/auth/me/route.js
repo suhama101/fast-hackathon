@@ -11,8 +11,8 @@ export async function GET(request) {
     user: {
       id: user.id,
       email: user.email,
-      fullName: user.fullName || user.full_name,
-      role: user.role,
+      fullName: user.fullName,
+      role: user.user_metadata?.role || user.app_metadata?.role || "recruiter",
       created_at: user.created_at,
     },
   });

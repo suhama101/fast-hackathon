@@ -102,6 +102,7 @@ export default function DashboardPage() {
     localStorage.removeItem("bid_engine_token");
     localStorage.removeItem("bid_engine_user_email");
     document.cookie = "bid_engine_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+    document.cookie = "bid_engine_refresh_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
     router.push("/login");
   };
 

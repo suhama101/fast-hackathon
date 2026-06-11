@@ -1,5 +1,26 @@
 import { NextResponse } from "next/server";
-import { jwtVerify } from "jose";
+
+const verifySupabaseToken = async (token) => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !anonKey) {
+    return null;
+  }
+
+  const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: {
+      apikey: anonKey,
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  return response.json();
+};
 
 export async function middleware(request) {
   const pathname = request.nextUrl.pathname;
@@ -7,6 +28,7 @@ export async function middleware(request) {
   const authHeader = request.headers.get("authorization") || "";
   const token =
     request.cookies.get("bid_engine_token")?.value ||
+    request.cookies.get("sb-access-token")?.value ||
     authHeader.replace(/^Bearer\s+/i, "");
 
   const isProtectedPage = pathname.startsWith("/dashboard");
@@ -29,16 +51,8 @@ export async function middleware(request) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  try {
-    const secret = new TextEncoder().encode(
-      process.env.JWT_SECRET ||
-        process.env.SUPABASE_JWT_SECRET ||
-        "fallback_secret_change_in_production"
-    );
-
-    await jwtVerify(token, secret);
-    return NextResponse.next();
-  } catch {
+  const user = await verifySupabaseToken(token);
+  if (!user?.id) {
     if (isProtectedAPI) {
       return NextResponse.json(
         { error: "Invalid or expired token" },
@@ -48,8 +62,11 @@ export async function middleware(request) {
 
     const response = NextResponse.redirect(new URL("/login", request.url));
     response.cookies.delete("bid_engine_token");
+    response.cookies.delete("bid_engine_refresh_token");
     return response;
   }
+
+  return NextResponse.next();
 }
 
 export const config = {

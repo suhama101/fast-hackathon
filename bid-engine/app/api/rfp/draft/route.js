@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { analyzeWithGroq } from "../../../../lib/groqClient";
-import { getSupabaseAdmin } from "../../../../lib/supabaseClient";
-import { requireWorkspaceOwner } from "../../../../lib/requestAuth";
+import { requireAuthenticatedUser, requireWorkspaceOwner } from "../../../../lib/requestAuth";
 
 const isUuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
@@ -220,7 +219,10 @@ export async function PATCH(request) {
       ? status
       : "edited";
 
-    const supabase = getSupabaseAdmin();
+    const auth = await requireAuthenticatedUser(request);
+    if (auth.errorResponse) return auth.errorResponse;
+
+    const { supabase } = auth;
     const { data: draftRow, error: draftLookupError } = await supabase
       .from("proposal_drafts")
       .select("workspace_id")
@@ -235,8 +237,8 @@ export async function PATCH(request) {
       );
     }
 
-    const ownership = await requireWorkspaceOwner(request, draftRow.workspace_id);
-    if (ownership.errorResponse) return ownership.errorResponse;
+    const workspaceCheck = await requireWorkspaceOwner(request, draftRow.workspace_id);
+    if (workspaceCheck.errorResponse) return workspaceCheck.errorResponse;
 
     const { data, error } = await supabase
       .from("proposal_drafts")

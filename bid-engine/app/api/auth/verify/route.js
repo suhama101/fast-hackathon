@@ -1,34 +1,19 @@
 import { NextResponse } from "next/server";
-import { jwtVerify } from "jose";
+import { requireAuthenticatedUser } from "../../../../lib/requestAuth";
 
 export async function GET(request) {
-  try {
-    const token =
-      request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ||
-      request.cookies.get("bid_engine_token")?.value;
+  const auth = await requireAuthenticatedUser(request);
+  if (auth.errorResponse) return auth.errorResponse;
 
-    if (!token) {
-      return NextResponse.json({ error: "No token" }, { status: 401 });
-    }
-
-    const secret = new TextEncoder().encode(
-      process.env.JWT_SECRET ||
-        process.env.SUPABASE_JWT_SECRET ||
-        "fallback_secret_change_in_production"
-    );
-
-    const { payload } = await jwtVerify(token, secret);
-
-    return NextResponse.json({
-      valid: true,
-      user: {
-        id: payload.userId,
-        email: payload.email,
-        fullName: payload.fullName,
-        role: payload.role,
-      },
-    });
-  } catch {
-    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-  }
+  const { user } = auth;
+  return NextResponse.json({
+    valid: true,
+    user: {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.user_metadata?.role || user.app_metadata?.role || "recruiter",
+      created_at: user.created_at,
+    },
+  });
 }

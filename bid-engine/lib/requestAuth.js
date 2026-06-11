@@ -1,16 +1,11 @@
 import { NextResponse } from "next/server";
-import { jwtVerify } from "jose";
-import { getSupabaseAdmin } from "./supabaseClient";
-
-const getJwtSecret = () =>
-  new TextEncoder().encode(
-    process.env.JWT_SECRET ||
-      process.env.SUPABASE_JWT_SECRET ||
-      "fallback_secret_change_in_production"
-  );
+import { createSupabaseAuthenticatedClient } from "./supabaseClient";
 
 const extractToken = (request) => {
-  const cookieToken = request.cookies.get("bid_engine_token")?.value;
+  const cookieToken =
+    request.cookies.get("bid_engine_token")?.value ||
+    request.cookies.get("sb-access-token")?.value;
+
   if (cookieToken) return cookieToken;
 
   const authHeader = request.headers.get("authorization") || request.headers.get("Authorization");
@@ -29,39 +24,27 @@ export async function requireAuthenticatedUser(request) {
   const token = extractToken(request);
   if (!token) return unauthorized();
 
-  try {
-    const { payload } = await jwtVerify(token, getJwtSecret());
-    if (!payload.userId) return unauthorized();
+  const supabase = createSupabaseAuthenticatedClient(token);
+  const { data, error } = await supabase.auth.getUser(token);
 
-    const supabase = getSupabaseAdmin();
-    const { data: userRecord, error } = await supabase
-      .from("users")
-      .select("id,email,full_name,role,created_at")
-      .eq("id", payload.userId)
-      .maybeSingle();
-
-    if (error) {
-      console.error("Authenticated user lookup failed:", error);
-      return unauthorized();
-    }
-
-    if (!userRecord) return unauthorized();
-
-    return {
-      supabase,
-      token,
-      user: {
-        id: userRecord.id,
-        email: userRecord.email,
-        fullName: userRecord.full_name,
-        full_name: userRecord.full_name,
-        role: userRecord.role,
-        created_at: userRecord.created_at,
-      },
-    };
-  } catch {
+  if (error || !data?.user) {
     return unauthorized();
   }
+
+  const fullName =
+    data.user.user_metadata?.full_name ||
+    data.user.user_metadata?.display_name ||
+    data.user.user_metadata?.name ||
+    null;
+
+  return {
+    supabase,
+    token,
+    user: {
+      ...data.user,
+      fullName,
+    },
+  };
 }
 
 export async function requireWorkspaceOwner(request, workspaceId) {

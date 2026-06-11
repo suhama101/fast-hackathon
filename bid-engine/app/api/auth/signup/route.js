@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
+
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
 export async function POST(request) {
   try {
     const payload = await request.json();
     const fullName = String(payload.fullName || payload.name || "").trim();
-    const email = String(payload.email || "").toLowerCase().trim();
+    const email = normalizeEmail(payload.email);
     const password = String(payload.password || "");
 
-    if (!email || !password || !fullName) {
+    if (!fullName || !email || !password) {
       return NextResponse.json(
         { error: "Full name, email and password are required" },
         { status: 400 }
@@ -25,74 +25,93 @@ export async function POST(request) {
     }
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const jwtSecret = process.env.JWT_SECRET || process.env.SUPABASE_JWT_SECRET;
 
-    if (!supabaseUrl || !serviceKey) {
+    if (!supabaseUrl || !anonKey || !serviceKey) {
       return NextResponse.json(
         { error: "Server configuration error" },
         { status: 500 }
       );
     }
 
-    const supabase = createClient(supabaseUrl, serviceKey, {
-      auth: { persistSession: false },
+    const admin = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const { data: existingUser } = await supabase
-      .from("users")
-      .select("id")
-      .eq("email", email)
-      .maybeSingle();
+    const authClient = createClient(supabaseUrl, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
 
-    if (existingUser) {
-      return NextResponse.json(
-        { error: "Email already registered" },
-        { status: 409 }
-      );
-    }
-
-    const passwordHash = await bcrypt.hash(password, 12);
-    const userId = crypto.randomUUID();
-
-    const { error: insertError } = await supabase
-      .from("users")
-      .insert({
-        id: userId,
-        email,
-        password_hash: passwordHash,
+    const { data: createdUser, error: createError } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: {
         full_name: fullName,
+        display_name: fullName,
         role: "recruiter",
-        created_at: new Date().toISOString(),
-      });
+      },
+    });
 
-    if (insertError) {
-      console.error("Insert error:", insertError);
+    if (createError || !createdUser?.user) {
+      const message = createError?.message || "Failed to create user";
+      if (/already|duplicate|exists/i.test(message)) {
+        return NextResponse.json(
+          { error: "Email already registered" },
+          { status: 409 }
+        );
+      }
+
       return NextResponse.json(
-        { error: "Failed to create account: " + insertError.message },
+        { error: "Failed to create account: " + message },
         { status: 500 }
       );
     }
 
-    const token = jwt.sign(
-      { userId, email, role: "recruiter", fullName },
-      jwtSecret || "fallback_secret_change_in_production",
-      { expiresIn: "7d" }
-    );
+    const { data: sessionData, error: signInError } = await authClient.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (signInError || !sessionData?.session) {
+      return NextResponse.json(
+        { error: "Account was created, but login failed: " + (signInError?.message || "No session returned") },
+        { status: 500 }
+      );
+    }
+
+    const { access_token: accessToken, refresh_token: refreshToken } = sessionData.session;
 
     const response = NextResponse.json({
       success: true,
-      token,
-      user: { id: userId, email, fullName, role: "recruiter" },
+      token: accessToken,
+      session: sessionData.session,
+      user: {
+        id: sessionData.user?.id || createdUser.user.id,
+        email: sessionData.user?.email || email,
+        fullName,
+        role: "recruiter",
+      },
     });
 
-    response.cookies.set("bid_engine_token", token, {
+    response.cookies.set("bid_engine_token", accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: 60 * 60 * 24 * 7,
       path: "/",
     });
+
+    if (refreshToken) {
+      response.cookies.set("bid_engine_refresh_token", refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 7,
+        path: "/",
+      });
+    }
 
     return response;
   } catch (error) {
