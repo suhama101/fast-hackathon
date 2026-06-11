@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from "../_lib/supabase.js";
+import { getSupabaseClient } from "../_lib/supabase.js";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -49,7 +49,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Password is required." });
     }
 
-    const supabase = getSupabaseAdmin();
+    const supabase = getSupabaseClient();
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,

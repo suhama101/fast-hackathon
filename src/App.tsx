@@ -94,6 +94,19 @@ export default function App() {
     };
   }, []);
 
+  const readApiResponse = async (response: Response) => {
+    const raw = await response.text();
+    if (!raw) return {};
+
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {
+        error: raw.length > 160 ? `${response.status} ${response.statusText}` : raw,
+      };
+    }
+  };
+
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsAuthenticating(true);
@@ -107,9 +120,9 @@ export default function App() {
         body: JSON.stringify({ email: userEmail, password: loginPassword }),
       });
 
-      const data = await response.json().catch(() => ({}));
+      const data: any = await readApiResponse(response);
       if (!response.ok) {
-        throw new Error(data.error || "Authentication failed.");
+        throw new Error(data.error || `Authentication failed (${response.status}).`);
       }
 
       const token = data.session?.access_token || data.token;
@@ -145,9 +158,9 @@ export default function App() {
         body: JSON.stringify({ email: userEmail, password: signupPassword, fullName: userName }),
       });
 
-      const data = await response.json().catch(() => ({}));
+      const data: any = await readApiResponse(response);
       if (!response.ok) {
-        throw new Error(data.error || "Registration failed.");
+        throw new Error(data.error || `Registration failed (${response.status}).`);
       }
 
       const token = data.session?.access_token || data.token;

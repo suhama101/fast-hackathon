@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from "../_lib/supabase.js";
+import { getSupabaseAdmin, getSupabaseClient } from "../_lib/supabase.js";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
@@ -51,29 +51,17 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Password must be at least 8 characters long." });
     }
 
-    const supabase = getSupabaseAdmin();
-    let { data, error } = await supabase.auth.signUp({
+    const supabaseAdmin = getSupabaseAdmin();
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
-      options: {
-        data: {
-          display_name: name || "Anonymous Bidder",
-        },
+      email_confirm: true,
+      user_metadata: {
+        display_name: name || "Anonymous Bidder",
+        full_name: name || "Anonymous Bidder",
       },
     });
-
-    if (error && /rate limit|too many requests/i.test(error.message || "")) {
-      const fallback = await supabase.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-        user_metadata: {
-          display_name: name || "Anonymous Bidder",
-        },
-      });
-      data = fallback.data;
-      error = fallback.error;
-    }
 
     if (error) {
       const mapped = mapSignupError(error.message);
@@ -86,12 +74,13 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Supabase did not return a user record for this signup." });
     }
 
-    const { data: confirmedUser, error: confirmError } = await supabase.auth.admin.updateUserById(
+    const { data: confirmedUser, error: confirmError } = await supabaseAdmin.auth.admin.updateUserById(
       data.user.id,
       {
         email_confirm: true,
         user_metadata: {
           display_name: name || "Anonymous Bidder",
+          full_name: name || "Anonymous Bidder",
         },
       }
     );
