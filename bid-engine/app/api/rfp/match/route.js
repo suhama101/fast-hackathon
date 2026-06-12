@@ -80,16 +80,65 @@ export async function POST(request) {
         .slice(0, 10),
     };
 
+    const capabilityText = capabilities.map(c => {
+      const summary = c.project_summary || c.description || '';
+      const certs = Array.isArray(c.certifications) ? c.certifications.join(' ') : String(c.certifications || c.certification || '');
+      const skills = Array.isArray(c.skills) ? c.skills.join(' ') : String(c.skills || '');
+      const domain = c.domain || '';
+      return `${summary} ${certs} ${skills} ${domain}`;
+    }).join(' ').toLowerCase();
+
     const matches = requirements.map((requirement, index) => {
       const normalized = normalizeRequirement(requirement, index);
-      const match = matchRequirementToCapabilities(normalized, capabilities, { entities: entityContext });
+      const reqText = normalized.requirement_text;
+      const requirementWords = reqText.toLowerCase().split(' ');
+
+      const matchCount = requirementWords.filter(word => 
+        word.length > 4 && capabilityText.includes(word)
+      ).length;
+
+      let status = 'partial';
+      if (matchCount >= 3) status = 'pass';
+      else if (matchCount >= 1) status = 'partial';
+      else status = 'fail';
+
+      // Find the best match capability for evidence and reasoning
+      let bestMatch = null;
+      let maxScore = -1;
+      
+      capabilities.forEach(c => {
+        const summary = c.project_summary || c.description || '';
+        const certs = Array.isArray(c.certifications) ? c.certifications.join(' ') : String(c.certifications || c.certification || '');
+        const skills = Array.isArray(c.skills) ? c.skills.join(' ') : String(c.skills || '');
+        const domain = c.domain || '';
+        const text = `${summary} ${certs} ${skills} ${domain}`.toLowerCase();
+        
+        const score = requirementWords.filter(word => word.length > 4 && text.includes(word)).length;
+        if (score > maxScore) {
+          maxScore = score;
+          bestMatch = c;
+        }
+      });
+
+      const confidence = bestMatch && requirementWords.filter(w => w.length > 4).length > 0
+        ? Math.min(100, Math.round((maxScore / requirementWords.filter(w => w.length > 4).length) * 100))
+        : 0;
+
+      const evidence = bestMatch
+        ? `${bestMatch.external_id || bestMatch.id || 'CAP'}: ${bestMatch.project_summary || bestMatch.description || bestMatch.project_name}`
+        : "No capability evidence found.";
+
+      const reasoning = bestMatch && maxScore > 0
+        ? `Matched ${maxScore} key terms with project: ${bestMatch.project_name || 'unnamed'}.`
+        : "No matching terms found in capability library.";
+
       return {
         requirement_id: normalized.id,
         requirement_text: normalized.requirement_text,
-        compliance_status: match.compliance_status,
-        confidence_score: match.confidence,
-        evidence: match.evidence,
-        reasoning: match.reasoning,
+        compliance_status: status,
+        confidence_score: confidence,
+        evidence: evidence,
+        reasoning: reasoning,
       };
     });
 

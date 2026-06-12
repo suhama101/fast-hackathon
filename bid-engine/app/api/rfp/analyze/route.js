@@ -118,10 +118,22 @@ ${rawText.slice(0, 18000)}`;
     // 3. Prepare requirements structure to populate database
     const rowsToInsert = toRequirementRows(extractedData, workspaceId, taxonomyMappings, entities);
 
+    // Deduplicate requirements by requirement_text and filter out section headings
+    const uniqueRequirements = rowsToInsert.filter((req, index, self) =>
+      index === self.findIndex(r => 
+        r.requirement_text.trim().toLowerCase() === 
+        req.requirement_text.trim().toLowerCase()
+      )
+    ).filter(req => {
+      const text = req.requirement_text.trim();
+      // Exclude items that are just section titles/headers (e.g. starting with "SECTION" followed by numbers)
+      return !(/^SECTION\s+\d+/i.test(text));
+    });
+
     // 4. Save rows to Supabase database
-    if (rowsToInsert.length > 0) {
+    if (uniqueRequirements.length > 0) {
       // Modify compatibility state
-      const databaseRows = rowsToInsert.map(row => ({
+      const databaseRows = uniqueRequirements.map(row => ({
         ...row,
         // Match Supabase schema check requirements (compliance_status must be 'pass', 'fail', or 'partial')
         compliance_status: "partial"

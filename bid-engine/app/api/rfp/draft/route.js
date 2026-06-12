@@ -173,7 +173,7 @@ Return ONLY valid JSON.`;
 
     // 5. Save generated sections to proposal_drafts table
     if (insertRows.length > 0) {
-      const { data: insertedDrafts, error: draftsError } = await supabase
+      const { data: savedDrafts, error: draftsError } = await supabase
         .from("proposal_drafts")
         .insert(insertRows)
         .select();
@@ -184,15 +184,15 @@ Return ONLY valid JSON.`;
 
       return NextResponse.json({
         success: true,
-        workspaceId,
-        drafts: insertedDrafts
+        drafts: savedDrafts,
+        count: savedDrafts.length
       });
     }
 
     return NextResponse.json({
       success: true,
-      workspaceId,
-      drafts: []
+      drafts: [],
+      count: 0
     });
 
   } catch (err) {

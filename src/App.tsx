@@ -161,6 +161,25 @@ export default function App() {
   }, [requirements, selectedRequirement]);
 
   useEffect(() => {
+    if (!selectedRequirement || savedDrafts.length === 0) {
+      setActiveDraft(null);
+      setActiveDraftText("");
+      return;
+    }
+    const cleanText = (selectedRequirement.description || selectedRequirement.requirement_text || "").slice(0, 30).toLowerCase();
+    const matched = savedDrafts.find((d: any) =>
+      String(d.section_title || "").toLowerCase().includes(cleanText)
+    );
+    if (matched) {
+      setActiveDraft(matched);
+      setActiveDraftText(matched.content || "");
+    } else {
+      setActiveDraft(null);
+      setActiveDraftText("");
+    }
+  }, [selectedRequirement, savedDrafts]);
+
+  useEffect(() => {
     let cancelled = false;
 
     const syncSession = async () => {

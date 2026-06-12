@@ -176,6 +176,19 @@ export default function DashboardPage() {
     }
   }, [activeDraftIdx, proposalDrafts]);
 
+  // Sync active draft when selectedRequirement changes
+  useEffect(() => {
+    if (!selectedRequirement || proposalDrafts.length === 0) return;
+    const reqText = selectedRequirement.description || selectedRequirement.requirement_text || "";
+    const cleanText = reqText.slice(0, 30).toLowerCase();
+    const matchedIdx = proposalDrafts.findIndex((d) =>
+      String(d.section || "").toLowerCase().includes(cleanText)
+    );
+    if (matchedIdx >= 0) {
+      setActiveDraftIdx(matchedIdx);
+    }
+  }, [selectedRequirement, proposalDrafts]);
+
   const mapDraft = (draft) => ({
     id: draft.id,
     section: draft.section_title,
@@ -204,7 +217,7 @@ export default function DashboardPage() {
   }, [selectedWorkspaceId, activeTab]);
 
   // Handle draft revisions
-  const handleUpdateDraft = async (status = "edited") => {
+  const handleUpdateDraft = async (status = "edited", customContent = null) => {
     const activeDraft = proposalDrafts[activeDraftIdx];
     if (!activeDraft) {
       setAlert({ type: "error", text: "Generate a proposal draft before saving edits." });
@@ -218,7 +231,7 @@ export default function DashboardPage() {
         headers: getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           draftId: activeDraft.id,
-          content: editedDraftValue,
+          content: customContent !== null ? customContent : editedDraftValue,
           status,
         }),
       });
@@ -245,7 +258,7 @@ export default function DashboardPage() {
     handleUpdateDraft("approved");
   };
 
-  const handleGenerateDrafts = async () => {
+  const handleGenerateDrafts = async (params = {}) => {
     if (!selectedWorkspaceId) {
       setAlert({ type: "error", text: "Analyze an RFP first so a Supabase workspace exists." });
       return;
@@ -257,14 +270,32 @@ export default function DashboardPage() {
       const response = await fetch("/api/rfp/draft", {
         method: "POST",
         headers: getAuthHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ workspaceId: selectedWorkspaceId }),
+        body: JSON.stringify({
+          workspaceId: selectedWorkspaceId,
+          requirementId: params.requirement?.id,
+          tone: params.tone,
+          capabilityInfo: params.capabilityInfo,
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Unable to generate proposal draft.");
 
       const drafts = (data.drafts || []).map(mapDraft);
       setProposalDrafts(drafts);
-      setActiveDraftIdx(0);
+      
+      // Select the index of the generated draft that matches this requirement
+      const reqText = params.requirement?.description || params.requirement?.requirement_text || "";
+      const cleanText = reqText.slice(0, 30).toLowerCase();
+      const matchedIdx = drafts.findIndex((d) =>
+        String(d.section || "").toLowerCase().includes(cleanText)
+      );
+      const activeIdx = matchedIdx >= 0 ? matchedIdx : 0;
+      
+      setActiveDraftIdx(activeIdx);
+      if (drafts[activeIdx]) {
+        setEditedDraftValue(drafts[activeIdx].content || "");
+      }
+
       setAlert({ type: "success", text: `Generated ${drafts.length} proposal draft section(s) from workspace evidence.` });
     } catch (err) {
       setAlert({ type: "error", text: `Draft generation failed: ${err.message}` });
@@ -771,118 +802,23 @@ export default function DashboardPage() {
 
           {/* TAB 4: AI Draft Responses */}
           {activeTab === "draft" && (
-            <div className="bg-[#1a1a2e] p-6 rounded-xl border border-purple-950/40 shadow-xl space-y-6">
-              <div className="flex justify-between items-center border-b border-purple-950/20 pb-4">
-                <div>
-                  <h2 className="text-lg font-bold text-white flex items-center gap-1.5">
-                    <Cpu className="text-purple-400 h-5 w-5" />
-                    AI Proposal Section Writer
-                  </h2>
-                  <p className="text-slate-400 text-xs mt-1">
-                    Generate dataset-backed proposal sections, edit them inline, approve final copy, and export the full response package.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleGenerateDrafts}
-                    disabled={isDrafting || !selectedWorkspaceId}
-                    className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white disabled:text-slate-500 font-semibold text-xs rounded-lg transition flex items-center gap-2"
-                  >
-                    {isDrafting ? <Loader className="h-3.5 w-3.5 animate-spin" /> : <Cpu className="h-3.5 w-3.5" />}
-                    <span>{isDrafting ? "Generating..." : "Generate Draft"}</span>
-                  </button>
-                  <button
-                    onClick={handleExportProposal}
-                    disabled={isExporting || !selectedWorkspaceId}
-                    className="px-4 py-2 bg-purple-950 hover:bg-purple-900 disabled:bg-slate-800 border border-purple-800 text-purple-300 disabled:text-slate-500 font-semibold text-xs rounded-lg transition"
-                  >
-                    {isExporting ? "Exporting..." : "Export DOCX"}
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-[#0a0a0f]/40 border border-purple-950/15 rounded-xl p-3">
-                <div className="text-xs text-slate-400">
-                  {proposalDrafts.length > 0
-                    ? `${proposalDrafts.length} AI-generated section(s) loaded from Supabase.`
-                    : "Generate proposal sections after extraction and compliance matching."}
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => loadDrafts().catch((err) => setAlert({ type: "error", text: err.message }))}
-                    disabled={!selectedWorkspaceId}
-                    className="px-4 py-2 bg-[#1a1a2e] hover:bg-[#23233a] disabled:bg-slate-800 border border-purple-950/40 text-purple-300 disabled:text-slate-500 font-semibold text-xs rounded-lg transition"
-                  >
-                    Refresh Drafts
-                  </button>
-                </div>
-              </div>
-
-              {proposalDrafts.length === 0 ? (
-                <div className="bg-[#0a0a0f]/40 border border-purple-950/15 rounded-xl p-10 text-center text-sm text-slate-400">
-                  No proposal sections generated yet. Run extraction and compliance matching, then click Generate Draft.
-                </div>
-              ) : (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Left: Sections layout list */}
-                <div className="space-y-2 border-r border-purple-950/20 pr-0 md:pr-4 flex flex-row md:flex-col overflow-x-auto md:overflow-x-visible pb-2 md:pb-0 gap-2 md:gap-0">
-                  {proposalDrafts.map((dr, idx) => (
-                    <button
-                      key={dr.id}
-                      onClick={() => setActiveDraftIdx(idx)}
-                      className={`w-full text-left p-3 rounded-lg text-xs transition border whitespace-nowrap md:whitespace-normal shrink-0 md:shrink-1 ${
-                        activeDraftIdx === idx
-                          ? "bg-purple-950/40 text-purple-300 border-purple-900/60"
-                          : "bg-[#0a0a0f]/40 text-slate-400 border-transparent hover:bg-purple-950/10 hover:text-slate-200"
-                      }`}
-                    >
-                      <span className="block truncate">{dr.section}</span>
-                      <span className="block text-[10px] text-slate-500 font-mono mt-1 uppercase">{dr.status}</span>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Right: Detailed response editor */}
-                <div className="md:col-span-2 space-y-4">
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-mono font-bold text-purple-300">
-                        Active section content editor
-                      </span>
-                      <span className="text-[10px] bg-purple-950/30 text-purple-450 border border-purple-905/20 px-2 py-0.5 rounded font-mono">
-                        Status: {proposalDrafts[activeDraftIdx]?.status || "AI Draft Prepared"}
-                      </span>
-                    </div>
-
-                    <textarea
-                      value={editedDraftValue}
-                      onChange={(e) => setEditedDraftValue(e.target.value)}
-                      className="w-full h-64 bg-[#0a0a0f] text-slate-200 p-4 border border-purple-950/40 rounded-xl focus:outline-none focus:border-purple-500 font-mono text-xs leading-relaxed"
-                    />
-                  </div>
-
-                  <div className="flex gap-2 justify-end">
-                    <button
-                      onClick={() => handleUpdateDraft("edited")}
-                      disabled={isSavingDraft}
-                      className="px-4 py-2 bg-purple-950 border border-purple-900 hover:bg-purple-920 disabled:bg-slate-800 text-purple-300 disabled:text-slate-500 font-semibold text-xs rounded-lg transition flex items-center gap-1.5 cursor-pointer"
-                      >
-                      <Edit className="h-3 w-3" />
-                      <span>{isSavingDraft ? "Saving..." : "Save Edits"}</span>
-                    </button>
-                    <button
-                      onClick={handleApproveDraft}
-                      disabled={isSavingDraft}
-                      className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white disabled:text-slate-500 font-semibold text-xs rounded-lg transition cursor-pointer"
-                    >
-                      Approve Section
-                    </button>
-                  </div>
-                </div>
-              </div>
-              )}
-            </div>
+            <ProposalDraft
+              activeRequirement={selectedRequirement}
+              activeDraft={proposalDrafts[activeDraftIdx] ? {
+                id: proposalDrafts[activeDraftIdx].id,
+                section_title: proposalDrafts[activeDraftIdx].section,
+                content: proposalDrafts[activeDraftIdx].content,
+                status: proposalDrafts[activeDraftIdx].status
+              } : null}
+              onGenerateDraft={handleGenerateDrafts}
+              onSaveDraft={(content) => {
+                setEditedDraftValue(content);
+                handleUpdateDraft("edited", content);
+              }}
+              draftResponse={editedDraftValue}
+              isDrafting={isDrafting}
+              isSavingDraft={isSavingDraft}
+            />
           )}
 
           {/* TAB 5: Win Score Diagnostic Dashboard */}
