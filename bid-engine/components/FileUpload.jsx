@@ -19,20 +19,19 @@ function getFileExtension(filename = "") { return filename.toLowerCase().split("
 
 /**
  * Extract text from PDF entirely in the browser using pdfjs-dist.
- * This avoids the DOMMatrix / serverless issue completely.
+ * Runs in browser only — no serverless/DOMMatrix issues.
  */
 async function extractPdfInBrowser(file) {
-  // Dynamically load pdfjs-dist only when needed
+  // Dynamic import so Vite only loads this when needed (lazy)
   const pdfjsLib = await import("pdfjs-dist");
 
-  // Point the worker to the CDN so Vite/webpack don't need to bundle it
-  if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc =
-      `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
-  }
+  // Use CDN worker for pdfjs-dist v5 — avoids bundling the 1MB worker file
+  const PDFJS_VERSION = "5.4.296";
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`;
 
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
   const pdf = await loadingTask.promise;
 
   const pageTexts = [];
@@ -43,7 +42,8 @@ async function extractPdfInBrowser(file) {
     pageTexts.push(pageText);
   }
 
-  return pageTexts.join("\n\n").replace(/\s{3,}/g, " ").trim();
+  await pdf.destroy();
+  return pageTexts.join("\n\n").replace(/[ \t]{3,}/g, " ").trim();
 }
 
 export default function FileUpload({ onTextParsed, isProcessing, initialText = "" }) {

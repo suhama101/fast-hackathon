@@ -12,11 +12,18 @@ export default defineConfig(() => {
       },
     },
     server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
-      // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+    },
+    optimizeDeps: {
+      // Pre-bundle pdfjs-dist so Vite resolves it correctly in dynamic imports
+      include: ['pdfjs-dist'],
+    },
+    build: {
+      rollupOptions: {
+        // Exclude the pdfjs worker from bundling — we load it from CDN at runtime
+        external: (id) => id.includes('pdf.worker'),
+      },
     },
   };
 });
