@@ -224,6 +224,54 @@ export default async function handler(req, res) {
 
     const { supabase, user } = auth;
     const workspaceDb = getSupabaseAdminOrNull() || supabase;
+    const contentType = String(getHeader(req, "content-type") || "");
+
+    // ── JSON path: client already extracted text (PDF parsed in browser) ──────
+    if (contentType.includes("application/json")) {
+      let body = {};
+      try {
+        const raw = await new Promise((resolve, reject) => {
+          const chunks = [];
+          req.on("data", (c) => chunks.push(c));
+          req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
+          req.on("error", reject);
+        });
+        body = JSON.parse(raw);
+      } catch (_) {
+        body = req.body || {};
+      }
+
+      const rawText = String(body.rawText || "").trim();
+      const fileName = String(body.fileName || "uploaded-rfp.txt");
+      const bidTitle = String(body.title || body.bidTitle || fileName.replace(/\.[^.]+$/, "") || "Untitled RFP").trim();
+
+      if (!rawText || rawText.length < 50) {
+        return errorResponse(res, 400, "No readable text provided.");
+      }
+
+      const { data: workspace, error: workspaceError } = await workspaceDb
+        .from("rfp_workspaces")
+        .insert({ user_id: user.id, title: bidTitle, status: "uploaded", raw_text: rawText, file_name: fileName })
+        .select("id,user_id,title,status,raw_text,file_name,created_at,updated_at")
+        .single();
+
+      if (workspaceError || !workspace?.id) {
+        const message = workspaceError?.message || "Unknown Supabase insert error";
+        const isPermissionError = /permission|policy|rls|row-level|violates row-level/i.test(message);
+        return errorResponse(res, isPermissionError ? 403 : 500,
+          isPermissionError
+            ? "Text received but Supabase rejected the workspace insert. Check RLS policies."
+            : "Text received but workspace could not be saved: " + message);
+      }
+
+      return res.status(200).json({
+        success: true, fileName, fileType: "text/plain", fileSize: rawText.length,
+        bidTitle, characterCount: rawText.length, previewText: rawText.slice(0, 500),
+        rawText, workspaceId: workspace.id, workspace,
+      });
+    }
+
+    // ── Multipart path: DOCX / TXT file uploaded directly ────────────────────
     const { fields, file } = await readUpload(req);
 
     if (!file?.buffer?.length) {
@@ -235,7 +283,7 @@ export default async function handler(req, res) {
     const bidTitle = String(fields.title || fields.bidTitle || fileName.replace(/\.[^.]+$/, "") || "Untitled RFP").trim();
 
     if (file.fileSize > MAX_UPLOAD_BYTES) {
-      return errorResponse(res, 413, "File is too large. Upload a PDF or DOCX smaller than 4 MB.");
+      return errorResponse(res, 413, "File is too large. Upload a file smaller than 4 MB.");
     }
 
     if (!isSupportedUpload(fileName, fileType)) {
@@ -245,7 +293,7 @@ export default async function handler(req, res) {
     const rawText = await extractTextFromFile(file.buffer, fileName, fileType);
 
     if (looksLikeBinaryData(rawText)) {
-      return errorResponse(res, 400, "Could not read file. Please ensure it is a valid PDF or DOCX document.");
+      return errorResponse(res, 400, "Could not read file. Please ensure it is a valid DOCX document.");
     }
 
     if (rawText.trim().length < 100) {
@@ -254,39 +302,23 @@ export default async function handler(req, res) {
 
     const { data: workspace, error: workspaceError } = await workspaceDb
       .from("rfp_workspaces")
-      .insert({
-        user_id: user.id,
-        title: bidTitle,
-        status: "uploaded",
-        raw_text: rawText,
-        file_name: fileName,
-      })
+      .insert({ user_id: user.id, title: bidTitle, status: "uploaded", raw_text: rawText, file_name: fileName })
       .select("id,user_id,title,status,raw_text,file_name,created_at,updated_at")
       .single();
 
     if (workspaceError || !workspace?.id) {
       const message = workspaceError?.message || "Unknown Supabase insert error";
       const isPermissionError = /permission|policy|rls|row-level|violates row-level/i.test(message);
-      return errorResponse(
-        res,
-        isPermissionError ? 403 : 500,
+      return errorResponse(res, isPermissionError ? 403 : 500,
         isPermissionError
-          ? "Uploaded text was extracted, but Supabase rejected the workspace insert. Check rfp_workspaces RLS insert policy for authenticated users."
-          : "Uploaded text was extracted, but the workspace could not be saved: " + message
-      );
+          ? "Uploaded text was extracted, but Supabase rejected the workspace insert. Check rfp_workspaces RLS insert policy."
+          : "Uploaded text was extracted, but the workspace could not be saved: " + message);
     }
 
     return res.status(200).json({
-      success: true,
-      fileName,
-      fileType,
-      fileSize: file.fileSize,
-      bidTitle,
-      characterCount: rawText.length,
-      previewText: rawText.slice(0, 500),
-      rawText,
-      workspaceId: workspace.id,
-      workspace,
+      success: true, fileName, fileType, fileSize: file.fileSize, bidTitle,
+      characterCount: rawText.length, previewText: rawText.slice(0, 500),
+      rawText, workspaceId: workspace.id, workspace,
     });
   } catch (err) {
     console.error("Upload route error:", err);
