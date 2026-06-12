@@ -7,11 +7,11 @@ export default function Navbar({ activeTab, setActiveTab, userEmail, onSignOut }
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const menuItems = [
-    { id: "upload", label: "Analyze RFP", icon: FileText },
-    { id: "requirements", label: "Requirements", icon: CheckCircle },
-    { id: "compliance", label: "Compliance & Match", icon: ShieldAlert },
-    { id: "draft", label: "Response Drafts", icon: Cpu },
-    { id: "score", label: "Win Score Predictor", icon: Award },
+    { id: "upload",       step: "1", label: "Upload RFP",        icon: FileText  },
+    { id: "requirements", step: "2", label: "Requirements",      icon: CheckCircle },
+    { id: "compliance",   step: "3", label: "Compliance Check",  icon: ShieldAlert },
+    { id: "draft",        step: "4", label: "AI Draft",          icon: Cpu       },
+    { id: "score",        step: "5", label: "Win Score",         icon: Award     },
   ];
 
   return (
@@ -35,14 +35,19 @@ export default function Navbar({ activeTab, setActiveTab, userEmail, onSignOut }
                 <button
                   key={item.id}
                   onClick={() => setActiveTab && setActiveTab(item.id)}
-                  className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-all duration-200 outline-none cursor-pointer ${
+                  className={`flex flex-col items-center px-3 py-2 rounded-md text-xs font-medium transition-all duration-200 outline-none cursor-pointer min-w-[90px] ${
                     isActive
                       ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20"
                       : "text-slate-400 hover:text-white hover:bg-slate-800"
                   }`}
                 >
-                  <Icon className="h-4 w-4" />
-                  <span>{item.label}</span>
+                  <div className="flex items-center gap-1.5">
+                    <Icon className="h-3.5 w-3.5" />
+                    <span className="font-bold">{item.label}</span>
+                  </div>
+                  <span className={`text-[9px] font-mono mt-0.5 ${isActive ? "text-indigo-200" : "text-slate-600"}`}>
+                    STEP {item.step}
+                  </span>
                 </button>
               );
             })}
@@ -98,7 +103,7 @@ export default function Navbar({ activeTab, setActiveTab, userEmail, onSignOut }
                 }`}
               >
                 <Icon className="h-5 w-5" />
-                <span>{item.label}</span>
+                <span>Step {item.step}: {item.label}</span>
               </button>
             );
           })}

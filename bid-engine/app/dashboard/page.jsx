@@ -634,30 +634,6 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* Tab Selection Row */}
-          <div className="bg-[#1a1a2e] border border-purple-950/30 p-1 rounded-xl flex flex-wrap gap-1 text-xs">
-            {[
-              { id: "upload", step: "1", title: "Upload RFP" },
-              { id: "requirements", step: "2", title: "Requirements" },
-              { id: "compliance", step: "3", title: "Compliance Check" },
-              { id: "draft", step: "4", title: "AI Draft" },
-              { id: "score", step: "5", title: "Win Score" }
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex-1 min-w-[110px] py-2 rounded-lg text-center transition cursor-pointer ${
-                  activeTab === tab.id
-                    ? "bg-purple-600 text-white font-bold shadow-lg shadow-purple-600/10"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-[#0a0a0f]/40"
-                }`}
-              >
-                <div className="text-[9px] uppercase tracking-wider font-mono text-purple-300/85">Step {tab.step}</div>
-                <div className="font-semibold truncate">{tab.title}</div>
-              </button>
-            ))}
-          </div>
-
           {/* TAB 1: Upload RFP */}
           {activeTab === "upload" && (
             <div className="space-y-4">
