@@ -118,17 +118,19 @@ ${rawText.slice(0, 18000)}`;
     // 3. Prepare requirements structure to populate database
     const rowsToInsert = toRequirementRows(extractedData, workspaceId, taxonomyMappings, entities);
 
-    // Deduplicate requirements by requirement_text and filter out section headings
-    const uniqueRequirements = rowsToInsert.filter((req, index, self) =>
-      index === self.findIndex(r => 
-        r.requirement_text.trim().toLowerCase() === 
-        req.requirement_text.trim().toLowerCase()
-      )
-    ).filter(req => {
-      const text = req.requirement_text.trim();
-      // Exclude items that are just section titles/headers (e.g. starting with "SECTION" followed by numbers)
-      return !(/^SECTION\s+\d+/i.test(text));
+    // Preprocessing filter layer: drop section titles / layout headings (case-insensitive)
+    const filteredRequirements = rowsToInsert.filter(req => {
+      const text = req.requirement_text.trim().toUpperCase();
+      const isHeader = text.startsWith("SECTION ") || text.endsWith(" REQUIREMENTS");
+      return !isHeader;
     });
+
+    // Deduplicate requirements by requirement_text
+    const uniqueRequirements = filteredRequirements.filter((req, index, self) =>
+      index === self.findIndex(r => 
+        r.requirement_text.trim().toLowerCase() === req.requirement_text.trim().toLowerCase()
+      )
+    );
 
     // 4. Save rows to Supabase database
     if (uniqueRequirements.length > 0) {
@@ -160,7 +162,8 @@ ${rawText.slice(0, 18000)}`;
         success: true,
         workspaceId,
         extracted: extractedData,
-        requirements: insertedRequirements
+        requirements: insertedRequirements,
+        count: insertedRequirements.length
       });
     }
 
@@ -168,7 +171,8 @@ ${rawText.slice(0, 18000)}`;
       success: true,
       workspaceId,
       extracted: extractedData,
-      requirements: []
+      requirements: [],
+      count: 0
     });
 
   } catch (err) {
