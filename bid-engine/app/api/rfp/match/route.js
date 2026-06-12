@@ -80,48 +80,50 @@ export async function POST(request) {
         .slice(0, 10),
     };
 
-    const capabilityText = capabilities.map(c => {
-      const summary = c.project_summary || c.description || '';
-      const certs = Array.isArray(c.certifications) ? c.certifications.join(' ') : String(c.certifications || c.certification || '');
-      const skills = Array.isArray(c.skills) ? c.skills.join(' ') : String(c.skills || '');
-      const domain = c.domain || '';
-      return `${summary} ${certs} ${skills} ${domain}`;
-    }).join(' ').toLowerCase();
-
     const matches = requirements.map((requirement, index) => {
       const normalized = normalizeRequirement(requirement, index);
       const reqText = normalized.requirement_text;
-      const requirementWords = reqText.toLowerCase().split(' ');
 
-      const matchCount = requirementWords.filter(word => 
-        word.length > 4 && capabilityText.includes(word)
-      ).length;
+      // Ratio-based keyword matching against full capability corpus
+      const reqWords = reqText.toLowerCase().split(/\s+/).filter(w => w.length > 4);
 
-      let status = 'partial';
-      if (matchCount >= 3) status = 'pass';
-      else if (matchCount >= 1) status = 'partial';
-      else status = 'fail';
-
-      // Find the best match capability for evidence and reasoning
+      // Find best individual capability match
       let bestMatch = null;
       let maxScore = -1;
-      
+
       capabilities.forEach(c => {
         const summary = c.project_summary || c.description || '';
         const certs = Array.isArray(c.certifications) ? c.certifications.join(' ') : String(c.certifications || c.certification || '');
         const skills = Array.isArray(c.skills) ? c.skills.join(' ') : String(c.skills || '');
         const domain = c.domain || '';
         const text = `${summary} ${certs} ${skills} ${domain}`.toLowerCase();
-        
-        const score = requirementWords.filter(word => word.length > 4 && text.includes(word)).length;
+
+        const score = reqWords.filter(word => text.includes(word)).length;
         if (score > maxScore) {
           maxScore = score;
           bestMatch = c;
         }
       });
 
-      const confidence = bestMatch && requirementWords.filter(w => w.length > 4).length > 0
-        ? Math.min(100, Math.round((maxScore / requirementWords.filter(w => w.length > 4).length) * 100))
+      // Build combined capability text for ratio calculation
+      const capabilityText = capabilities.map(c => {
+        const summary = c.project_summary || c.description || '';
+        const certs = Array.isArray(c.certifications) ? c.certifications.join(' ') : String(c.certifications || c.certification || '');
+        const skills = Array.isArray(c.skills) ? c.skills.join(' ') : String(c.skills || '');
+        const domain = c.domain || '';
+        return `${summary} ${certs} ${skills} ${domain}`;
+      }).join(' ').toLowerCase();
+
+      const matchedWords = reqWords.filter(word => capabilityText.includes(word));
+      const matchRatio = reqWords.length > 0 ? matchedWords.length / reqWords.length : 0;
+
+      let status;
+      if (matchRatio >= 0.4) status = 'pass';
+      else if (matchRatio >= 0.15) status = 'partial';
+      else status = 'fail';
+
+      const confidence = bestMatch && reqWords.length > 0
+        ? Math.min(100, Math.round((maxScore / reqWords.length) * 100))
         : 0;
 
       const evidence = bestMatch
@@ -129,7 +131,7 @@ export async function POST(request) {
         : "No capability evidence found.";
 
       const reasoning = bestMatch && maxScore > 0
-        ? `Matched ${maxScore} key terms with project: ${bestMatch.project_name || 'unnamed'}.`
+        ? `Matched ${maxScore} key terms (ratio: ${Math.round(matchRatio * 100)}%) with project: ${bestMatch.project_name || 'unnamed'}.`
         : "No matching terms found in capability library.";
 
       return {
@@ -137,8 +139,8 @@ export async function POST(request) {
         requirement_text: normalized.requirement_text,
         compliance_status: status,
         confidence_score: confidence,
-        evidence: evidence,
-        reasoning: reasoning,
+        evidence,
+        reasoning,
       };
     });
 

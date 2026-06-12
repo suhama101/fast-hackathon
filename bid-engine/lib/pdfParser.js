@@ -6,22 +6,15 @@ const MIN_EXTRACTED_TEXT_LENGTH = 50;
  * @returns {Promise<string>} - Clean extracted text.
  */
 export async function extractTextFromPDF(buffer) {
-  let parser;
-
   try {
-    const { PDFParse } = await import("pdf-parse");
-    parser = new PDFParse({ data: buffer });
-    const data = await parser.getText();
+    // pdf-parse default export is the parse function itself
+    const pdfParse = await import("pdf-parse");
+    const parseFn = pdfParse.default || pdfParse;
+    const data = await parseFn(buffer);
     return ensureReadableText(data.text, "PDF");
   } catch (error) {
     console.error("Error parsing PDF with pdf-parse:", error);
     throw new Error("PDF parsing failed: " + error.message);
-  } finally {
-    if (parser) {
-      await parser.destroy().catch((destroyError) => {
-        console.warn("Error cleaning up PDF parser:", destroyError);
-      });
-    }
   }
 }
 

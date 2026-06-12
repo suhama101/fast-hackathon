@@ -500,9 +500,14 @@ export default function DashboardPage() {
             riskBuffer: scoreRecord.evaluation_history_score || 75
           },
           decision: scoreRecord.decision,
+          mandatoryTotal: scoreRecord.mandatory_total || 0,
+          mandatoryPassed: scoreRecord.mandatory_passed || 0,
+          mandatoryPartial: scoreRecord.mandatory_partial || 0,
+          mandatoryFailed: scoreRecord.mandatory_failed || 0,
           remedialActions: [
             `Historical sector win rate: ${scoreRecord.sector_win_rate || data.scores?.sector_win_rate || 0}%.`,
-            `Similar experience score: ${scoreRecord.similar_experience_score || data.scores?.similar_experience_score || 0}%.`
+            `Similar experience score: ${scoreRecord.similar_experience_score || data.scores?.similar_experience_score || 0}%.`,
+            `Mandatory compliance: ${scoreRecord.mandatory_passed || 0} passed / ${scoreRecord.mandatory_total || 0} total mandatory requirements.`
           ]
         });
       }

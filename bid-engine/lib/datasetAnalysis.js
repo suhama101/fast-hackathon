@@ -164,18 +164,23 @@ export function calculateWinScore({ requirements = [], capabilities = [], bidHis
   const wins = historyBase.filter((bid) => String(bid.outcome).toLowerCase() === "win").length;
   const sectorWinRate = historyBase.length ? Math.round((wins / historyBase.length) * 100) : 50;
 
+  // Bug 4 fix: use real pass/partial/fail counts from actual requirements
+  const mandatory = requirements.filter((req) => req.requirement_type === "mandatory");
+  const mandatoryPassed = mandatory.filter((req) => req.compliance_status === "pass").length;
+  const mandatoryPartial = mandatory.filter((req) => req.compliance_status === "partial").length;
+  const mandatoryTotal = mandatory.length;
+
+  // compliance_score is the primary driver: based on actual pass vs total mandatory
+  const complianceScore = mandatoryTotal > 0
+    ? Math.round(((mandatoryPassed + mandatoryPartial * 0.5) / mandatoryTotal) * 100)
+    : Math.round(historyBase.reduce((sum, bid) => sum + Number(bid.compliance_percent || 0), 0) / Math.max(1, historyBase.length)) || 70;
+
+  // capability_match covers all requirements (mandatory + evaluation)
   const passed = requirements.filter((req) => req.compliance_status === "pass").length;
   const partial = requirements.filter((req) => req.compliance_status === "partial").length;
   const capabilityMatch = requirements.length
     ? Math.round(((passed + partial * 0.55) / requirements.length) * 100)
     : Math.min(90, Math.round((capabilities.length / 50) * 100));
-
-  const mandatory = requirements.filter((req) => req.requirement_type === "mandatory");
-  const mandatoryPassed = mandatory.filter((req) => req.compliance_status === "pass").length;
-  const mandatoryPartial = mandatory.filter((req) => req.compliance_status === "partial").length;
-  const complianceScore = mandatory.length
-    ? Math.round(((mandatoryPassed + mandatoryPartial * 0.5) / mandatory.length) * 100)
-    : Math.round(historyBase.reduce((sum, bid) => sum + Number(bid.compliance_percent || 0), 0) / Math.max(1, historyBase.length)) || 70;
 
   const avgHistoryScore = historyBase.length
     ? Math.round(historyBase.reduce((sum, bid) => sum + Number(bid.score_percent || 0), 0) / historyBase.length)
@@ -222,9 +227,15 @@ export function calculateWinScore({ requirements = [], capabilities = [], bidHis
     Math.min(12, riskPenalty * 0.35)
   );
 
+  const clampedTotal = Math.max(0, Math.min(100, totalScore));
+
+  // GO/NO-GO is driven by compliance score (pass_count / total_mandatory):
+  // If compliance_score >= 70 → GO, otherwise → NO-GO
+  const decision = complianceScore >= 70 ? "GO" : "NO-GO";
+
   return {
     sector,
-    total_score: Math.max(0, Math.min(100, totalScore)),
+    total_score: clampedTotal,
     budget_alignment: Math.round(budgetAlignment),
     capability_match: capabilityMatch,
     compliance_score: complianceScore,
@@ -235,6 +246,11 @@ export function calculateWinScore({ requirements = [], capabilities = [], bidHis
     commercial_history_score: commercialHistory,
     strategic_fit_score: strategicFit,
     risk_penalty_score: Math.min(100, riskPenalty),
-    decision: totalScore >= 70 ? "GO" : "NO-GO",
+    decision,
+    // Expose raw counts for transparency in the UI
+    mandatory_total: mandatoryTotal,
+    mandatory_passed: mandatoryPassed,
+    mandatory_partial: mandatoryPartial,
+    mandatory_failed: mandatoryTotal - mandatoryPassed - mandatoryPartial,
   };
 }

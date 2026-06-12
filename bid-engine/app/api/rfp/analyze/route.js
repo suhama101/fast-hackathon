@@ -119,10 +119,18 @@ ${rawText.slice(0, 18000)}`;
     const rowsToInsert = toRequirementRows(extractedData, workspaceId, taxonomyMappings, entities);
 
     // Preprocessing filter layer: drop section titles / layout headings (case-insensitive)
+    const HEADING_PATTERNS = [
+      /^SECTION\s+\d+/i,
+      /^PART\s+\d+/i,
+      /^SCHEDULE\s+\d+/i,
+      /^CHAPTER\s+\d+/i,
+      /^ANNEX\s+[A-Z\d]+/i,
+      /^APPENDIX\s+[A-Z\d]+/i,
+      /^\d+\.\s*[A-Z\s]{3,40}$/,
+    ];
     const filteredRequirements = rowsToInsert.filter(req => {
-      const text = req.requirement_text.trim().toUpperCase();
-      const isHeader = text.startsWith("SECTION ") || text.endsWith(" REQUIREMENTS");
-      return !isHeader;
+      const text = req.requirement_text.trim();
+      return !HEADING_PATTERNS.some(p => p.test(text));
     });
 
     // Deduplicate requirements by requirement_text

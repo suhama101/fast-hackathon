@@ -45,7 +45,7 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const { workspaceId } = await request.json();
+    const { workspaceId, requirementId, tone, capabilityInfo } = await request.json();
 
     if (!isUuid(workspaceId)) {
       return NextResponse.json(
@@ -114,7 +114,9 @@ export async function POST(request) {
     }
 
     // 3. Draft the proposal template using Groq
-    const systemPrompt = "You are an expert proposal writer. Write professional, compliant proposal responses.";
+    const toneInstruction = tone ? `Use a "${tone}" tone throughout.` : "Use a professional, compliant tone.";
+    const capabilityContext = capabilityInfo ? `\n\nADDITIONAL CAPABILITY CONTEXT FROM USER:\n${capabilityInfo}` : "";
+    const systemPrompt = `You are an expert proposal writer. Write professional, compliant proposal responses. ${toneInstruction}`;
 
     const userPrompt = `Generate a completed proposal document responding to the retrieved RFP questions/requirements.
 
@@ -139,7 +141,7 @@ ${JSON.stringify(capabilities.slice(0, 10).map(c => ({
   certification: c.certification,
   contract_value: c.contract_value,
   client_type: c.client_type
-})))}
+})))}${capabilityContext}
 
 For each section/requirement item:
 - Find the most matching capabilities from our library lists.
@@ -185,7 +187,8 @@ Return ONLY valid JSON.`;
       return NextResponse.json({
         success: true,
         drafts: savedDrafts,
-        count: savedDrafts.length
+        count: savedDrafts.length,
+        message: "Draft generated successfully"
       });
     }
 

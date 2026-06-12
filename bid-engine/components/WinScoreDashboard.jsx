@@ -112,6 +112,32 @@ export default function WinScoreDashboard({
                   {decision}
                 </span>
               </div>
+
+              {/* Show real compliance counts if available */}
+              {analysis.mandatoryTotal > 0 && (
+                <div className="mt-3 text-[10px] font-mono text-slate-500 space-y-0.5 border-t border-purple-950/20 pt-3 w-full text-left">
+                  <div className="flex justify-between">
+                    <span>Mandatory Total:</span>
+                    <span className="text-slate-300">{analysis.mandatoryTotal}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-emerald-400">Passed:</span>
+                    <span className="text-emerald-300">{analysis.mandatoryPassed}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-amber-400">Partial:</span>
+                    <span className="text-amber-300">{analysis.mandatoryPartial}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-rose-400">Failed:</span>
+                    <span className="text-rose-300">{analysis.mandatoryFailed}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-purple-950/20 pt-1 mt-1">
+                    <span className="text-purple-300">Compliance:</span>
+                    <span className="text-purple-200 font-bold">{analysis.benchmarks?.complianceScore}%</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Metric breakdown bars */}
