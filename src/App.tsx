@@ -854,30 +854,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Steps Navigation Tabs */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 bg-[#1a1a2e] border border-purple-955/20 p-1.5 rounded-xl gap-2 text-center text-xs">
-              {[
-                { id: "upload", step: "1", title: "Upload RFP" },
-                { id: "requirements", step: "2", title: "Requirements" },
-                { id: "compliance", step: "3", title: "Compliance Check" },
-                { id: "draft", step: "4", title: "AI Draft" },
-                { id: "score", step: "5", title: "Win Score" },
-              ].map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => setActiveTab(item.id)}
-                  className={`py-2 p-1.5 rounded-lg flex flex-col items-center justify-center transition cursor-pointer ${
-                    activeTab === item.id
-                      ? "bg-purple-600 text-white font-bold"
-                      : "text-slate-400 hover:text-slate-200 hover:bg-[#0a0a0f]/40"
-                  }`}
-                >
-                  <span className="text-[10px] font-mono opacity-85 block uppercase">Step {item.step}</span>
-                  <span className="mt-0.5 tracking-tight font-semibold">{item.title}</span>
-                </button>
-              ))}
-            </div>
-
+            {/* Tab content */}
             <div>
               {activeTab === "upload" && (
                 <FileUpload
