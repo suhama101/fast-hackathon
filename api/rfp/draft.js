@@ -88,7 +88,10 @@ export default async function handler(req, res) {
         throw new Error(`Failed to load workspace requirement parameters: ${reqError?.message}`);
       }
 
-      let targets = requirements.filter((r) => r.extracted_value === "Question Section");
+      let targets = requirements.filter((r) => r.requirement_type === "mandatory");
+      if (targets.length === 0) {
+        targets = requirements.filter((r) => r.extracted_value === "Question Section");
+      }
       if (targets.length === 0) {
         targets = requirements.slice(0, 4);
       }

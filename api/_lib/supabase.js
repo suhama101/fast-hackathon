@@ -14,11 +14,17 @@ const createServerClient = (apiKey) =>
     },
   });
 
+const getServerAuthApiKey = () =>
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_AUTH_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  process.env.SUPABASE_ANON_KEY;
+
 export const getSupabaseClient = () =>
-  createServerClient(getEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"));
+  createServerClient(getServerAuthApiKey() || getEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"));
 
 export const createSupabaseAuthenticatedClient = (accessToken) =>
-  createClient(getEnv("NEXT_PUBLIC_SUPABASE_URL"), getEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"), {
+  createClient(getEnv("NEXT_PUBLIC_SUPABASE_URL"), getServerAuthApiKey() || getEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"), {
     auth: {
       persistSession: false,
       autoRefreshToken: false,

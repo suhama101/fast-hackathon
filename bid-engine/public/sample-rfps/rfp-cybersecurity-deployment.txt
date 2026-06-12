@@ -1,0 +1,26 @@
+Cybersecurity Deployment RFP
+
+1. The bidder must provide a complete cybersecurity assessment and deployment plan.
+2. The bidder must support endpoint protection, SIEM, log retention, and incident response integration.
+3. The bidder shall deploy network segmentation controls across all ministry sites.
+4. The bidder must provide vulnerability scanning and remediation guidance.
+5. The bidder shall submit a security architecture diagram and implementation roadmap.
+6. The bidder must provide 24/7 monitoring and alert triage.
+7. The bidder must guarantee critical incident response within 30 minutes.
+8. The bidder must provide monthly security reporting and executive dashboards.
+9. The bidder shall maintain encryption for data in transit and at rest.
+10. The bidder must comply with ISO 27001, NIST CSF, or equivalent security standards.
+11. The bidder must provide named security lead and project manager resources.
+12. The bidder shall complete user awareness training for all designated staff.
+13. The bidder must provide access control, MFA, and privileged access governance.
+14. The bidder must document backup, recovery, and disaster recovery procedures.
+15. The bidder shall support secure cloud configuration and hardening.
+16. The bidder must provide change management and audit log procedures.
+17. The bidder must provide asset inventory and endpoint coverage reporting.
+18. The bidder shall maintain confidentiality, data protection, and escalation protocols.
+19. The bidder must submit all deliverables before the implementation deadline.
+20. The bidder must include compliance certification, implementation evidence, and support SLAs.
+
+Submission deadline: 15 December 2026 at 3:00 PM.
+Questions must be submitted by 5 December 2026.
+The successful bidder shall support a 12-month managed security operations period.

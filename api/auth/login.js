@@ -28,6 +28,19 @@ const setAuthCookie = (res, token) => {
   res.setHeader("Set-Cookie", cookie);
 };
 
+const readJsonBody = (req) => {
+  if (!req.body) return {};
+  if (typeof req.body !== "string") return req.body;
+
+  try {
+    return JSON.parse(req.body || "{}");
+  } catch {
+    const error = new Error("Invalid JSON request body.");
+    error.statusCode = 400;
+    throw error;
+  }
+};
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", ["POST"]);
@@ -35,7 +48,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const payload = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    const payload = readJsonBody(req);
     const email = normalizeEmail(payload.email);
     const password = String(payload.password || "");
 
@@ -85,6 +98,8 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error("Login route error:", err);
     clearAuthCookie(res);
-    return res.status(500).json({ error: "Internal Server Error within Auth endpoint: " + err.message });
+    const status = err.statusCode || 500;
+    const prefix = status === 400 ? "" : "Internal Server Error within Auth endpoint: ";
+    return res.status(status).json({ error: prefix + err.message });
   }
 }

@@ -126,7 +126,7 @@ export default async function handler(req, res) {
     });
 
     if (workspaceId && isUuid(workspaceId)) {
-      await Promise.all(matches.map((match) =>
+      const updateResults = await Promise.all(matches.map((match) =>
         workspaceDb
           .from("rfp_requirements")
           .update({
@@ -139,6 +139,10 @@ export default async function handler(req, res) {
           .eq("id", match.requirement_id)
           .eq("workspace_id", workspaceId)
       ));
+      const updateError = updateResults.find((result) => result.error)?.error;
+      if (updateError) {
+        throw new Error(`Failed to save compliance match results: ${updateError.message}`);
+      }
     }
 
     const requirementsWithMatches = requirements.map((requirement, index) => {

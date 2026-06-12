@@ -3,9 +3,19 @@ import { createClient } from "@supabase/supabase-js";
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
+const readJsonBody = async (request) => {
+  try {
+    return await request.json();
+  } catch {
+    const error = new Error("Invalid JSON request body.");
+    error.statusCode = 400;
+    throw error;
+  }
+};
+
 export async function POST(request) {
   try {
-    const payload = await request.json();
+    const payload = await readJsonBody(request);
     const fullName = String(payload.fullName || payload.name || "").trim();
     const email = normalizeEmail(payload.email);
     const password = String(payload.password || "");
@@ -25,10 +35,9 @@ export async function POST(request) {
     }
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (!supabaseUrl || !anonKey || !serviceKey) {
+    if (!supabaseUrl || !serviceKey) {
       return NextResponse.json(
         { error: "Server configuration error" },
         { status: 500 }
@@ -39,7 +48,7 @@ export async function POST(request) {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const authClient = createClient(supabaseUrl, anonKey, {
+    const authClient = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
@@ -116,9 +125,8 @@ export async function POST(request) {
     return response;
   } catch (error) {
     console.error("Signup error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    const status = error.statusCode || 500;
+    const prefix = status === 400 ? "" : "Internal server error: ";
+    return NextResponse.json({ error: prefix + error.message }, { status });
   }
 }

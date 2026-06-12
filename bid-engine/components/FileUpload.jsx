@@ -10,6 +10,11 @@ const SAMPLE_RFPS = [
     path: "/sample-rfps/rfp-it-services.txt",
   },
   {
+    label: "Cybersecurity",
+    fileName: "rfp-cybersecurity-deployment.txt",
+    path: "/sample-rfps/rfp-cybersecurity-deployment.txt",
+  },
+  {
     label: "Construction",
     fileName: "rfp-construction.txt",
     path: "/sample-rfps/rfp-construction.txt",
