@@ -187,8 +187,8 @@ const scoreCapability = (requirementText, requirementMeta, capability) => {
 };
 
 const buildEvidenceStatus = (score, typeScore, keywordScore) => {
-  if (score >= 0.68 && typeScore >= 0.6 && keywordScore >= 0.15) return "Strong Match";
-  if (score >= 0.42 && (typeScore >= 0.3 || keywordScore >= 0.12)) return "Partial Match";
+  if (score >= 0.75 && typeScore >= 0.6 && keywordScore >= 0.15) return "Strong Match";
+  if (score >= 0.55 && score < 0.75 && (typeScore >= 0.4 || keywordScore >= 0.15)) return "Partial Match";
   return "No Match";
 };
 
@@ -228,13 +228,29 @@ export const retrieveCapabilityEvidence = (requirement, capabilities = [], optio
   const filteredCapabilities = capabilities.filter((capability) => {
     const capabilityTypes = capability.evidence_types || [capability.evidence_type || "Past Project"];
     const typeScore = evidenceTypeCompatibility(requirementMeta.expected_evidence_type, capabilityTypes);
-    if (typeScore >= 0.75) return true;
-    if (requirementMeta.category === "Technical" || requirementMeta.category === "Evaluation") return true;
-    if (/Past Project|Methodology|Work Plan|Certification/.test(requirementMeta.expected_evidence_type || "")) return true;
-    return false;
+    return typeScore > 0;
   });
 
-  const ranked = (filteredCapabilities.length ? filteredCapabilities : capabilities)
+  if (!filteredCapabilities.length) {
+    return {
+      compliance_status: "fail",
+      match_status: "No Match",
+      confidence_score: 0,
+      match_score: 0,
+      evidence_type: requirementMeta.expected_evidence_type,
+      matched_evidence: "No strong matching evidence found",
+      evidence: "No strong matching evidence found",
+      reason: "No capability record matched the expected evidence type for this requirement.",
+      source: "",
+      evidence_items: [],
+      source_references: [],
+      matched_terms: [],
+      requirement_category: requirementMeta.category,
+      expected_evidence_type: requirementMeta.expected_evidence_type,
+    };
+  }
+
+  const ranked = filteredCapabilities
     .map((capability) => scoreCapability(queryText, requirementMeta, capability))
     .sort((left, right) => right.score - left.score);
 
