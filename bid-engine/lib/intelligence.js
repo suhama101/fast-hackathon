@@ -36,6 +36,9 @@ const BOILERPLATE_PHRASES = [
   "should check the accuracy, reliability and completeness",
 ];
 
+const ACTION_VERB_PATTERN = /\b(must|shall|required|required to|should|need to|may not|must not|not exceed|at least|no later than|within|provide|submit|include|attach|demonstrate|validate|undertake|deliver|comply|disclose|declare|initial|sign|register|maintain|participate|respond|quote|present|complete|attend|travel|support|monitor|manage|report|staff|recover|restore|backup|configure|deploy|secure|ensure|operate|resolve|train|document|transition|implement|perform|conduct|preserve|protect|guarantee)\b/i;
+const SPECIFIC_DETAIL_PATTERN = /\b(\d+%|\d+\s*(days?|weeks?|months?)|ntn|pkr|usd|email|address|proposal validity|page limit|hard copy|soft copy|blacklist|blacklisting|conflict of interest|related party|anti[-\s]?fraud|anti[-\s]?corruption|deliverable|evaluation criteria|scoring|deadline|closing date|submission|support|reporting|staffing|recovery|continuity|backup|restore|failover|resilience|helpdesk|monitoring|sla|uptime|availability|incident response|cybersecurity|cloud|network|server)\b/i;
+
 const COMPLETE_CLAUSE_ENDINGS = [
   /shall be$/i,
   /must be$/i,
@@ -47,6 +50,8 @@ const COMPLETE_CLAUSE_ENDINGS = [
   /provide$/i,
   /submit$/i,
 ];
+
+const SPLIT_CLAUSE_PATTERN = /(?:\s*;\s*|\.\s+|\s+(?:and|or)\s+(?=(?:provide|support|monitor|manage|maintain|report|deliver|implement|deploy|ensure|conduct|prepare|submit|include|respond|review|train|recover|restore|backup|document|configure|secure|operate|transition|staff|preserve|protect|guarantee))|,\s+(?=(?:provide|support|monitor|manage|maintain|report|deliver|implement|deploy|ensure|conduct|prepare|submit|include|respond|review|train|recover|restore|backup|document|configure|secure|operate|transition|staff|preserve|protect|guarantee)))/i;
 
 const FRAGMENT_ENDINGS = [
   /to the$/i,
@@ -187,6 +192,8 @@ export const inferRequirementMetadata = (requirementText, sectionName = "", sour
     expectedEvidenceType = "Team CV";
   } else if (/methodology|work plan|activity plan|implementation plan/i.test(text)) {
     expectedEvidenceType = /work plan|activity plan/i.test(text) ? "Work Plan" : "Methodology";
+  } else if (/business continuity|disaster recovery|backup|restore|failover|recovery plan|continuity plan|incident recovery|resilience/i.test(text)) {
+    expectedEvidenceType = "Disaster Recovery";
   } else if (/deliverable|inception report|final report|presentation|phase\s*\d+\s*report/i.test(text)) {
     expectedEvidenceType = "Work Plan";
   } else if (/similar projects?|past project|experience with|support services?|training|fleet management solution|implementation team|solution|system|platform|deploy|merchant segmentation|payment systems?|digital financial services|stakeholder engagement/i.test(text)) {
@@ -220,6 +227,17 @@ const sentenceSplit = (text) =>
     .map((line) => cleanText(line))
     .filter(Boolean);
 
+const splitAtomicClauses = (text) =>
+  sentenceSplit(text).flatMap((sentence) => {
+    const trimmed = cleanText(sentence).replace(/^[\-\u2022*\d.\)\(]+\s*/, "");
+    if (!trimmed) return [];
+    const segments = trimmed
+      .split(SPLIT_CLAUSE_PATTERN)
+      .map((part) => cleanText(part))
+      .filter(Boolean);
+    return segments.length > 1 ? segments : [trimmed];
+  });
+
 const likelyRequirement = (line) => {
   if (line.length < 12 || line.length > 260) return false;
   if (BOILERPLATE_PHRASES.some((phrase) => line.toLowerCase().includes(phrase))) return false;
@@ -238,9 +256,9 @@ const likelyRequirement = (line) => {
 const requirementSpecificityScore = (line) => {
   const text = cleanText(line);
   let score = 0;
-  if (/\b(must|shall|required|required to|should|need to|may not|must not|not exceed|at least|no later than|within|provide|submit|include|attach|demonstrate|validate|undertake|deliver|comply|disclose|declare|initial|sign|register|maintain|participate|respond|quote|present|complete|attend|travel)\b/i.test(text)) score += 3;
-  if (/\b(\d+%|\d+\s*(days?|weeks?|months?)|ntn|pkr|usd|email|address|page limit|hard copy|soft copy|blacklist|conflict of interest|related party|anti[-\s]?fraud|anti[-\s]?corruption|deliverable|evaluation criteria|scoring|deadline|closing date|submission|proposal validity)\b/i.test(text)) score += 3;
-  if (/\b(eligibility|submission|technical proposal|financial proposal|evaluation criteria|scoring|deliverables|payment schedule|consortium|jv|legal|declaration|compliance|vendor|qualification)\b/i.test(text)) score += 2;
+  if (ACTION_VERB_PATTERN.test(text)) score += 3;
+  if (SPECIFIC_DETAIL_PATTERN.test(text)) score += 3;
+  if (/\b(eligibility|submission|technical proposal|financial proposal|evaluation criteria|scoring|deliverables|payment schedule|consortium|jv|legal|declaration|compliance|vendor|qualification|support|reporting|staffing|recovery|continuity|backup|restore|failover|helpdesk|monitoring|sla)\b/i.test(text)) score += 2;
   if (BOILERPLATE_PHRASES.some((phrase) => text.toLowerCase().includes(phrase))) score -= 4;
   if (text.split(/\s+/).filter(Boolean).length < 6) score -= 1;
   return score;
@@ -277,7 +295,7 @@ export function extractSectionAwareRequirements(rawText = "") {
 
   const flushBuffer = () => {
     const joined = sourceBuffer.join(" ");
-    sentenceSplit(joined).forEach((sentence) => {
+    splitAtomicClauses(joined).forEach((sentence) => {
       if (likelyRequirement(sentence)) {
         results.push(createRequirement({
           line: sentence,
@@ -318,6 +336,17 @@ export function extractSectionAwareRequirements(rawText = "") {
   });
 
   flushBuffer();
+
+  splitAtomicClauses(text).forEach((sentence) => {
+    if (likelyRequirement(sentence)) {
+      results.push(createRequirement({
+        line: sentence,
+        sectionName: "Global Text Scan",
+        pageNumber: null,
+        sourceText: sentence,
+      }));
+    }
+  });
 
   const keywordClauses = [
     ["related party", "Comply with related party disclosure requirements."],

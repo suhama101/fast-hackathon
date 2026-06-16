@@ -7,14 +7,14 @@ const isUuid = (value) =>
 
 const buildEvidenceLockedContent = (sectionTitle, requirementText, matchedEvidence, matchStatus, expectedEvidenceType) => {
   if (!matchedEvidence || matchStatus === "No Match") {
-    return `## ${sectionTitle}\n\nEvidence required: ${expectedEvidenceType || "supporting evidence"}. No strong supporting evidence was found in the capability library.\n`;
+    return `## ${sectionTitle}\n\nNo verified supporting evidence was found. Required evidence: ${expectedEvidenceType || "supporting evidence"}.\n`;
   }
 
   if (matchStatus === "Partial Match") {
-    return `## ${sectionTitle}\n\nOur existing experience partially supports this requirement; however, additional evidence is recommended before final submission.\n\nEvidence reference: ${matchedEvidence}\n`;
+    return `## ${sectionTitle}\n\nOur available experience partially supports this requirement, but additional supporting documentation is recommended before final submission.\n\nEvidence reference: ${matchedEvidence}\n`;
   }
 
-  return `## ${sectionTitle}\n\nEvidence-backed response: ${matchedEvidence}\n\nThis section should be edited only within the bounds of the matched evidence above.\n`;
+  return `## ${sectionTitle}\n\nWe have demonstrated experience relevant to this requirement.\n\nEvidence reference: ${matchedEvidence}\n`;
 };
 
 export async function GET(request) {

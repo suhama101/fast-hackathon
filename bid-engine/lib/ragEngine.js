@@ -146,6 +146,7 @@ const evidenceTypeCompatibility = (expectedType, capabilityTypes = []) => {
     "team cv": ["team cv"],
     methodology: ["methodology", "work plan"],
     "work plan": ["work plan", "methodology"],
+    "disaster recovery": ["disaster recovery", "work plan", "methodology"],
   };
 
   const allowed = synonyms[normalized] || [];
@@ -215,6 +216,8 @@ export const retrieveCapabilityEvidence = (requirement, capabilities = [], optio
     requirement?.source_section || "",
     requirement?.source_text || ""
   );
+  const recoveryTerms = ["business continuity", "disaster recovery", "backup", "restore", "failover", "recovery plan", "continuity plan", "incident recovery", "resilience"];
+  const recoveryRequirement = recoveryTerms.some((term) => requirementText.toLowerCase().includes(term) || String(requirementMeta.expected_evidence_type || "").toLowerCase() === "disaster recovery");
   const queryText = [
     requirementText,
     requirement?.source_section || "",
@@ -226,6 +229,11 @@ export const retrieveCapabilityEvidence = (requirement, capabilities = [], optio
   ].join(" ").trim();
 
   const filteredCapabilities = capabilities.filter((capability) => {
+    if (recoveryRequirement) {
+      const capabilityText = buildCapabilityDocument(capability).toLowerCase();
+      const hasRecoverySignal = recoveryTerms.some((term) => capabilityText.includes(term));
+      if (!hasRecoverySignal) return false;
+    }
     const capabilityTypes = capability.evidence_types || [capability.evidence_type || "Past Project"];
     const typeScore = evidenceTypeCompatibility(requirementMeta.expected_evidence_type, capabilityTypes);
     return typeScore > 0;
