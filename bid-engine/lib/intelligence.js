@@ -48,6 +48,26 @@ const COMPLETE_CLAUSE_ENDINGS = [
   /submit$/i,
 ];
 
+const FRAGMENT_ENDINGS = [
+  /to the$/i,
+  /to be$/i,
+  /of the$/i,
+  /and one$/i,
+  /and the$/i,
+  /or$/i,
+  /with$/i,
+  /by$/i,
+  /in$/i,
+  /on$/i,
+  /at$/i,
+  /for$/i,
+  /from$/i,
+  /of$/i,
+  /the$/i,
+  /a$/i,
+  /an$/i,
+];
+
 const CATEGORY_RULES = [
   {
     category: "Compliance",
@@ -204,10 +224,13 @@ const likelyRequirement = (line) => {
   if (line.length < 12 || line.length > 260) return false;
   if (BOILERPLATE_PHRASES.some((phrase) => line.toLowerCase().includes(phrase))) return false;
   if (COMPLETE_CLAUSE_ENDINGS.some((pattern) => pattern.test(line))) return false;
+  if (FRAGMENT_ENDINGS.some((pattern) => pattern.test(line.trim()))) return false;
 
   const tokenCount = cleanText(line).split(/\s+/).filter(Boolean).length;
   const hasActionVerb = /\b(must|shall|required|required to|should|need to|may not|must not|not exceed|at least|no later than|within|provide|submit|include|attach|demonstrate|validate|undertake|deliver|comply|disclose|declare|initial|sign|register|maintain|participate|respond|quote|present|complete|attend|travel)\b/i.test(line);
   const hasSpecificDetail = /\b(\d+%|\d+\s*(days?|weeks?|months?)|ntn|pkr|usd|email|address|proposal validity|page limit|hard copy|soft copy|blacklist|blacklisting|conflict of interest|related party|anti[-\s]?fraud|anti[-\s]?corruption|deliverable|evaluation criteria|scoring|deadline|closing date|submission)\b/i.test(line);
+
+  if (/^[a-z]/.test(line.trim()) && !hasActionVerb && !hasSpecificDetail) return false;
 
   return tokenCount >= 4 && (hasActionVerb || hasSpecificDetail);
 };
