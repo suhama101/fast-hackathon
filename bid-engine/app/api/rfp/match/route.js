@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { loadHackathonDataset } from "../../../../lib/datasetLoader";
 import { buildCapabilityIndex, retrieveCapabilityEvidence } from "../../../../lib/ragEngine";
+import { inferRequirementMetadata } from "../../../../lib/intelligence.js";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../../../../lib/requestAuth";
 
 const isUuid = (value) =>
@@ -8,9 +9,11 @@ const isUuid = (value) =>
 
 const normalizeRequirement = (req, index = 0) => ({
   id: req.id || `REQ-${String(index + 1).padStart(3, "0")}`,
-  requirement_text: req.requirement_text || req.description || req.title || "",
+  requirement_text: req.requirement_text || req.requirement || req.description || req.title || "",
   requirement_type: req.requirement_type || "mandatory",
   compliance_status: req.compliance_status || "partial",
+  source_section: req.source_section || "",
+  source_text: req.source_text || req.requirement_text || req.requirement || "",
 });
 
 export async function POST(request) {
@@ -84,21 +87,35 @@ export async function POST(request) {
 
     const matches = requirements.map((requirement, index) => {
       const normalized = normalizeRequirement(requirement, index);
-      const evidence = retrieveCapabilityEvidence(normalized, capabilityIndex, {
-        topK: 3,
-        entities: entityContext,
-      });
+      const requirementMeta = inferRequirementMetadata(
+        normalized.requirement_text,
+        normalized.source_section,
+        normalized.source_text
+      );
+      const evidence = retrieveCapabilityEvidence(
+        { ...normalized, category: requirementMeta.category },
+        capabilityIndex,
+        { topK: 3, entities: entityContext }
+      );
 
       return {
         requirement_id: normalized.id,
+        requirement: normalized.requirement_text,
         requirement_text: normalized.requirement_text,
+        requirement_category: evidence.requirement_category || requirementMeta.category,
+        expected_evidence_type: evidence.expected_evidence_type || requirementMeta.expected_evidence_type,
+        matched_evidence: evidence.matched_evidence,
+        evidence_type: evidence.evidence_type,
+        match_score: evidence.match_score,
+        match_status: evidence.match_status,
         compliance_status: evidence.compliance_status,
         confidence_score: evidence.confidence_score,
+        reason: evidence.reason,
+        source: evidence.source,
         evidence: evidence.evidence,
         evidence_items: evidence.evidence_items,
         source_references: evidence.source_references,
         matched_terms: evidence.matched_terms,
-        reasoning: evidence.reasoning,
       };
     });
 
@@ -106,15 +123,15 @@ export async function POST(request) {
       await Promise.all(matches.map((match) =>
         supabase
           .from("rfp_requirements")
-        .update({
-          compliance_status: match.compliance_status,
-          extracted_value: match.evidence,
-          matched_evidence: match.evidence,
-          match_confidence: match.confidence_score,
-          match_reasoning: match.reasoning,
-        })
-        .eq("id", match.requirement_id)
-        .eq("workspace_id", workspaceId)
+          .update({
+            compliance_status: match.compliance_status,
+            extracted_value: match.matched_evidence,
+            matched_evidence: match.matched_evidence,
+            match_confidence: match.confidence_score,
+            match_reasoning: match.reason,
+          })
+          .eq("id", match.requirement_id)
+          .eq("workspace_id", workspaceId)
       ));
     }
 
@@ -123,11 +140,14 @@ export async function POST(request) {
       const match = matches.find((item) => item.requirement_id === normalized.id);
       return {
         ...requirement,
-        compliance_status: match?.compliance_status || "partial",
-        matched_evidence: match?.evidence,
+        compliance_status: match?.compliance_status || "fail",
+        matched_evidence: match?.matched_evidence,
         match_confidence: match?.confidence_score,
-        match_reasoning: match?.reasoning,
+        match_reasoning: match?.reason,
         evidence_items: match?.evidence_items || [],
+        match_status: match?.match_status || "No Match",
+        expected_evidence_type: match?.expected_evidence_type,
+        requirement_category: match?.requirement_category,
       };
     });
 

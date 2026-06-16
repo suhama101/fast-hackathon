@@ -8,6 +8,7 @@ import RequirementsList from "../../components/RequirementsList";
 import ComplianceChecker from "../../components/ComplianceChecker";
 import ProposalDraft from "../../components/ProposalDraft";
 import ReviewerPanel from "../../components/ReviewerPanel";
+import DiagnosticsPanel from "../../components/DiagnosticsPanel";
 import WinScoreDashboard from "../../components/WinScoreDashboard";
 import { 
   Laptop, 
@@ -216,11 +217,16 @@ export default function DashboardPage() {
   const buildRequirementsFromAnalyze = (items = []) =>
     items.map((item, idx) => ({
       id: item.id || `REQ-${String(idx + 1).padStart(3, "0")}`,
-      title: item.requirement_text?.slice(0, 40) || "Extracted Criteria",
-      category: item.requirement_type === "mandatory" ? "Security" : "Technical",
-      severity: item.requirement_type === "mandatory" ? "Critical" : "Important",
+      title: item.requirement?.slice(0, 40) || item.requirement_text?.slice(0, 40) || "Extracted Criteria",
+      category: item.category || (item.requirement_type === "deadline" ? "Deadline" : "Mandatory"),
+      priority: item.priority || "Standard",
       status: item.compliance_status || "partial",
-      description: item.requirement_text,
+      description: item.requirement_text || item.requirement,
+      sourceSection: item.source_section || "Unknown Section",
+      sourcePage: item.source_page || null,
+      sourceText: item.source_text || item.requirement_text || item.requirement || "",
+      needsEvidence: item.needs_evidence !== false,
+      expectedEvidenceType: item.expected_evidence_type || "",
     }));
 
   const fetchJson = async (url, options = {}) => {
@@ -426,12 +432,16 @@ export default function DashboardPage() {
         nextMatrix[match.requirement_id] = {
           matchGrade: grade,
           status: match.compliance_status,
-          reasoning: `${match.reasoning} Confidence: ${match.confidence_score}%.`,
+          matchStatus: match.match_status || (match.compliance_status === "pass" ? "Strong Match" : match.compliance_status === "partial" ? "Partial Match" : "No Match"),
+          reasoning: `${match.reason || match.reasoning || "No reasoning provided."} Confidence: ${match.confidence_score}%.`,
           recommendation: match.compliance_status === "fail"
             ? "Add partner evidence or create an exception response for this gap."
             : "Attach this evidence in the proposal appendix.",
           evidence: match.evidence,
           evidenceItems: match.evidence_items || [],
+          confidenceScore: match.confidence_score || 0,
+          evidenceType: match.evidence_type || match.expected_evidence_type || "",
+          source: match.source || "",
         };
       });
       setMatchMatrix(nextMatrix);
@@ -584,11 +594,16 @@ export default function DashboardPage() {
         // Map types database columns into mock state
         const parsedReqs = data.requirements.map((item, idx) => ({
           id: item.id || `REQ-${String(idx + 1).padStart(3, "0")}`,
-          title: item.requirement_text?.slice(0, 40) || "Extracted Criteria",
-          category: item.requirement_type === "mandatory" ? "Security" : "Technical",
-          severity: item.requirement_type === "mandatory" ? "Critical" : "Important",
+          title: item.requirement?.slice(0, 40) || item.requirement_text?.slice(0, 40) || "Extracted Criteria",
+          category: item.category || (item.requirement_type === "deadline" ? "Deadline" : "Mandatory"),
+          priority: item.priority || "Standard",
           status: item.compliance_status || "partial",
-          description: item.requirement_text
+          description: item.requirement_text || item.requirement,
+          sourceSection: item.source_section || "Unknown Section",
+          sourcePage: item.source_page || null,
+          sourceText: item.source_text || item.requirement_text || item.requirement || "",
+          needsEvidence: item.needs_evidence !== false,
+          expectedEvidenceType: item.expected_evidence_type || "",
         }));
         setRequirements(parsedReqs);
         setSelectedRequirement(parsedReqs[0]);
@@ -649,12 +664,16 @@ export default function DashboardPage() {
           nextMatrix[match.requirement_id] = {
             matchGrade: grade,
             status: match.compliance_status,
-            reasoning: `${match.reasoning} Confidence: ${match.confidence_score}%.`,
+            matchStatus: match.match_status || (match.compliance_status === "pass" ? "Strong Match" : match.compliance_status === "partial" ? "Partial Match" : "No Match"),
+            reasoning: `${match.reason || match.reasoning || "No reasoning provided."} Confidence: ${match.confidence_score}%.`,
             recommendation: match.compliance_status === "fail"
               ? "Add partner evidence or create an exception response for this gap."
               : "Attach this evidence in the proposal appendix.",
             evidence: match.evidence,
             evidenceItems: match.evidence_items || [],
+            confidenceScore: match.confidence_score || 0,
+            evidenceType: match.evidence_type || match.expected_evidence_type || "",
+            source: match.source || "",
           };
         });
         setMatchMatrix(nextMatrix);
@@ -912,15 +931,14 @@ export default function DashboardPage() {
                           <p className="text-slate-400 text-[11px] mt-0.5 truncate">{req.description}</p>
                         </td>
                         <td className="p-3.5 border-b border-purple-950/20">
-                          {req.category === "Security" ? (
-                            <span className="px-2.5 py-1 text-[10px] bg-rose-950/40 text-rose-300 font-mono border border-rose-900/30 rounded-full">
-                              MANDATORY (RED)
-                            </span>
-                          ) : (
+                          <div className="flex flex-wrap gap-1.5">
                             <span className="px-2.5 py-1 text-[10px] bg-blue-950/40 text-blue-300 font-mono border border-blue-900/30 rounded-full">
-                              EVALUATION (BLUE)
+                              {req.category || "Mandatory"}
                             </span>
-                          )}
+                            <span className="px-2.5 py-1 text-[10px] bg-purple-950/40 text-purple-300 font-mono border border-purple-900/30 rounded-full">
+                              {req.priority || "Standard"}
+                            </span>
+                          </div>
                         </td>
                         <td className="p-3.5 border-b border-purple-950/20">
                           <span className={`inline-flex items-center gap-1 font-mono text-[10px] px-2 py-0.5 rounded ${
@@ -1009,6 +1027,8 @@ export default function DashboardPage() {
                   );
                 })}
               </div>
+
+              <DiagnosticsPanel requirements={requirements} matchMatrix={matchMatrix} />
 
               <div className="flex justify-between pt-2">
                 <button

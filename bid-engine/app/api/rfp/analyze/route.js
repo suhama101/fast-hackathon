@@ -2,106 +2,33 @@ import { NextResponse } from "next/server";
 import { analyzeWithGroq } from "../../../../lib/groqClient";
 import { loadHackathonDataset } from "../../../../lib/datasetLoader";
 import { mapCriteriaToTaxonomy } from "../../../../lib/datasetAnalysis";
+import {
+  buildRequirementId,
+  extractSectionAwareRequirements,
+  flattenModelRequirements,
+  mergeRequirementCandidates,
+  toDbRequirementType,
+} from "../../../../lib/intelligence.js";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../../../../lib/requestAuth";
 
 const isUuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
 
-// ── Heading / noise filter ────────────────────────────────────────────────────
-const HEADING_PATTERNS = [
-  /^SECTION\s+\d+/i, /^PART\s+\d+/i, /^SCHEDULE\s+\d+/i,
-  /^CHAPTER\s+\d+/i, /^ANNEX\s+[A-Z\d]+/i, /^APPENDIX\s+[A-Z\d]+/i,
-  /^\d+\.\s*[A-Z\s]{3,40}$/,
-];
-const isHeading = (text) => HEADING_PATTERNS.some((p) => p.test(text.trim()));
+const buildRequirementRows = (requirements = [], workspaceId) =>
+  requirements.map((requirement) => ({
+    workspace_id: workspaceId,
+    requirement_text: requirement.requirement,
+    requirement_type: toDbRequirementType(requirement.category),
+    compliance_status: "partial",
+    extracted_value: requirement.source_text || requirement.requirement,
+  }));
 
-// ── Build flat requirement rows from extracted JSON ───────────────────────────
-const buildRequirementRows = (extractedData, workspaceId, taxonomyMappings) => {
-  const rows = [];
-
-  const add = (text, type, value) => {
-    if (!text || typeof text !== "string") return;
-    const clean = text.trim().slice(0, 200); // max 200 chars per requirement
-    if (clean.length < 10) return;           // skip empty / too-short items
-    if (isHeading(clean)) return;            // skip section headings
-    rows.push({
-      workspace_id: workspaceId,
-      requirement_text: clean,
-      requirement_type: type,
-      compliance_status: "partial",
-      extracted_value: value,
-    });
-  };
-
-  // Each array item from Groq becomes ONE separate requirement row
-  (extractedData.mandatory_requirements || []).forEach((item) =>
-    add(item, "mandatory", "Mandatory Core")
-  );
-  (extractedData.eligibility_criteria || []).forEach((item) =>
-    add(item, "mandatory", "Eligibility Criteria")
-  );
-  (extractedData.required_documents || []).forEach((item) =>
-    add(item, "mandatory", "Required Document")
-  );
-  (extractedData.technical_requirements || []).forEach((item) =>
-    add(item, "technical", "Technical Requirement")
-  );
-  (extractedData.financial_requirements || []).forEach((item) =>
-    add(item, "financial", "Financial Requirement")
-  );
-  (extractedData.compliance_clauses || []).forEach((item) =>
-    add(item, "mandatory", "Compliance Clause")
-  );
-
-  if (taxonomyMappings.length > 0) {
-    taxonomyMappings.forEach((item) => {
-      const label = `${item.source_text} [${item.criteria_name}; ${item.sector}; ${item.weight_percentage ?? "N/A"}%]`;
-      add(label, "evaluation", `Taxonomy: ${item.criteria_name} | ${item.sector}`);
-    });
-  } else {
-    (extractedData.evaluation_criteria || []).forEach((item) =>
-      add(item, "evaluation", "Evaluation Metric")
-    );
-  }
-
-  // questions_to_answer (new field from improved prompt)
-  (extractedData.questions_to_answer || []).forEach((item) =>
-    add(item, "evaluation", "Question to Answer")
-  );
-  (extractedData.question_answer_sections || []).forEach((item) =>
-    add(item, "evaluation", "Question / Answer Section")
-  );
-
-  // deadlines — new array format from improved prompt
-  (extractedData.deadlines || []).forEach((item) =>
-    add(item, "deadline", "Submission Deadline")
-  );
-  // budget — new array format from improved prompt
-  (extractedData.budget || []).forEach((item) =>
-    add(item, "evaluation", "Budget Range")
-  );
-
-  // Legacy single-value fields (backwards compat)
-  if (extractedData.submission_deadline && typeof extractedData.submission_deadline === "string") {
-    add(`Submission Deadline: ${extractedData.submission_deadline}`, "deadline", extractedData.submission_deadline);
-  }
-  if (extractedData.budget_range && typeof extractedData.budget_range === "string") {
-    add(`Budget Range: ${extractedData.budget_range}`, "evaluation", extractedData.budget_range);
-  }
-
-  return rows;
-};
-
-// ── Deduplicate using first-50-chars key ──────────────────────────────────────
-const deduplicateRows = (rows) => {
-  const seen = new Set();
-  return rows.filter((req) => {
-    const key = req.requirement_text.substring(0, 50).toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-};
+const countByCategory = (requirements = []) =>
+  requirements.reduce((accumulator, requirement) => {
+    const key = requirement.category || "Unknown";
+    accumulator[key] = (accumulator[key] || 0) + 1;
+    return accumulator;
+  }, {});
 
 export async function POST(request) {
   try {
@@ -120,7 +47,6 @@ export async function POST(request) {
     const { supabase, user } = auth;
     let workspaceId = givenWorkspaceId;
 
-    // ── Step 1: Create workspace if needed ────────────────────────────────────
     if (!workspaceId) {
       const bidTitle = givenBidTitle || `RFP Analysis - ${new Date().toLocaleDateString()}`;
       const { data: newWorkspace, error: workspaceError } = await supabase
@@ -134,7 +60,6 @@ export async function POST(request) {
       if (workspaceCheck.errorResponse) return workspaceCheck.errorResponse;
     }
 
-    // ── Step 2: Groq AI extraction with improved per-item prompt ──────────────
     const systemPrompt = "You are an expert procurement analyst. Extract requirements from RFP documents in JSON format only.";
 
     const extractionPrompt = `You are an expert procurement analyst.
@@ -148,90 +73,101 @@ CRITICAL RULES:
 - Do NOT include questions from Q&A sections
 - Extract ONLY clear requirements and obligations
 
-Extract and return JSON:
+Return JSON using arrays of short strings for all relevant fields:
 {
-    "mandatory_requirements": [
-      "Vendor must be registered with SECP",
-      "Minimum 5 years software development experience required",
-      "ISO 9001 certification is mandatory"
-    ],
-    "eligibility_criteria": [
-      "Bidders must have experience in public sector procurement",
-      "Local presence is required in the country of execution"
-    ],
-    "required_documents": [
-      "Company profile",
-      "Tax registration certificate",
-      "Audited financial statements"
-    ],
-    "technical_requirements": [
-      "Provide a secure cloud-hosted solution",
-      "Support multi-user access and audit logs"
-    ],
-    "financial_requirements": [
-      "Submit pricing in local currency",
-      "Include taxes, support, and maintenance in the quote"
-    ],
-    "evaluation_criteria": [
-      "Technical Approach - 30% weight",
-      "Past Experience and References - 25% weight"
-    ],
-    "questions_to_answer": [
-      "Describe your technical approach for enterprise systems",
-      "Provide details of 3 similar government projects"
-    ],
-    "question_answer_sections": [
-      "Question 1: Describe your approach to implementation - Answer: ...",
-      "Question 2: Provide your closest reference projects - Answer: ..."
-    ],
-    "deadlines": ["Submission deadline: December 31, 2026"],
-    "budget": ["Budget range: PKR 50M to 80M"],
-    "compliance_clauses": [
-    "Must comply with Pakistan Data Protection Act 2023",
-    "Data must be stored on servers in Pakistan"
-  ]
+  "mandatory_requirements": [],
+  "eligibility_criteria": [],
+  "prequalification_criteria": [],
+  "required_documents": [],
+  "technical_requirements": [],
+  "technical_proposal_requirements": [],
+  "financial_requirements": [],
+  "financial_proposal_requirements": [],
+  "evaluation_criteria": [],
+  "scoring_weights": [],
+  "questions_to_answer": [],
+  "question_answer_sections": [],
+  "deliverables": [],
+  "payment_schedule": [],
+  "contract_validity": [],
+  "proposal_validity": [],
+  "consortium_requirements": [],
+  "conflict_of_interest_requirements": [],
+  "related_party_disclosure_requirements": [],
+  "anti_fraud_corruption_requirements": [],
+  "blacklisting_undertaking": [],
+  "ntn_tax_registration_requirements": [],
+  "local_partner_requirements": [],
+  "submission_instructions": [],
+  "page_limits": [],
+  "hard_copy_submission_rules": [],
+  "soft_copy_submission_rules": [],
+  "submission_details": [],
+  "deadlines": [],
+  "compliance_clauses": []
 }
 
-Return ONLY valid JSON. No explanations. No markdown.
-Each item must be SHORT and SPECIFIC - one clear requirement only.
-
 RFP TEXT:
-${rawText.substring(0, 6000)}`;
+${rawText.substring(0, 9000)}`;
 
     const extractedData = await analyzeWithGroq(extractionPrompt, systemPrompt);
     if (!extractedData || extractedData.error) {
       throw new Error(extractedData?.message || "Groq extraction failed.");
     }
-    extractedData.eligibility_criteria = extractedData.eligibility_criteria || [];
-    extractedData.required_documents = extractedData.required_documents || [];
-    extractedData.technical_requirements = extractedData.technical_requirements || [];
-    extractedData.financial_requirements = extractedData.financial_requirements || [];
-    extractedData.question_answer_sections = extractedData.question_answer_sections || [];
 
-    // ── Step 3: Taxonomy mapping ──────────────────────────────────────────────
     const { data: dbTaxonomy, error: taxonomyError } = await supabase
       .from("evaluation_criteria_taxonomy").select("*");
     const fallbackTaxonomy = loadHackathonDataset().evaluationCriteria;
     const taxonomy = !taxonomyError && dbTaxonomy?.length ? dbTaxonomy : fallbackTaxonomy;
-    const taxonomyMappings = mapCriteriaToTaxonomy(extractedData.evaluation_criteria || [], taxonomy);
-    extractedData.taxonomy_mappings = taxonomyMappings;
 
-    // ── Step 4: Build rows — each array item = one row ────────────────────────
-    const rawRows = buildRequirementRows(extractedData, workspaceId, taxonomyMappings);
+    const llmRequirements = flattenModelRequirements(extractedData);
+    const heuristicRequirements = extractSectionAwareRequirements(rawText);
+    const taxonomyRequirements = mapCriteriaToTaxonomy(extractedData.evaluation_criteria || [], taxonomy).map((item) => ({
+      requirement: item.source_text || item.criteria_name,
+      category: "Evaluation",
+      priority: item.weight_percentage ? "Important" : "Standard",
+      source_section: `Taxonomy: ${item.criteria_name}`,
+      source_page: null,
+      source_text: item.source_text || item.criteria_name,
+      needs_evidence: true,
+      expected_evidence_type: "Methodology",
+    }));
 
-    // Deduplicate with first-50-chars key
-    const deduplicated = deduplicateRows(rawRows);
+    const mergedRequirements = mergeRequirementCandidates(
+      llmRequirements,
+      heuristicRequirements,
+      taxonomyRequirements
+    ).map((requirement, index) => ({
+      id: buildRequirementId(index),
+      requirement: requirement.requirement,
+      requirement_text: requirement.requirement,
+      category: requirement.category,
+      priority: requirement.priority,
+      source_section: requirement.source_section,
+      source_page: requirement.source_page,
+      source_text: requirement.source_text,
+      needs_evidence: requirement.needs_evidence,
+      expected_evidence_type: requirement.expected_evidence_type,
+      requirement_type: toDbRequirementType(requirement.category),
+      compliance_status: "partial",
+    }));
 
-    // Cap at 30 requirements max
-    const finalRows = deduplicated.slice(0, 30);
+    const finalRequirements = mergedRequirements.slice(0, 80);
+    const rawRows = buildRequirementRows(finalRequirements, workspaceId);
 
-    // ── Step 5: Save to Supabase ──────────────────────────────────────────────
-    if (finalRows.length === 0) {
-      return NextResponse.json({ success: true, workspaceId, extracted: extractedData, requirements: [], count: 0 });
+    if (rawRows.length === 0) {
+      return NextResponse.json({
+        success: true,
+        workspaceId,
+        extracted: extractedData,
+        requirements: [],
+        diagnostics: { total_requirements: 0, category_counts: {} },
+        count: 0,
+      });
     }
 
     const { data: insertedRequirements, error: insertError } = await supabase
-      .from("rfp_requirements").insert(finalRows).select();
+      .from("rfp_requirements").insert(rawRows).select();
 
     if (insertError) {
       console.error("Supabase requirement insertion fault:", insertError);
@@ -244,14 +180,33 @@ ${rawText.substring(0, 6000)}`;
       .eq("id", workspaceId)
       .eq("user_id", user.id);
 
+    const diagnostics = {
+      total_requirements: finalRequirements.length,
+      category_counts: countByCategory(finalRequirements),
+    };
+
     return NextResponse.json({
       success: true,
       workspaceId,
       extracted: extractedData,
-      requirements: insertedRequirements,
+      requirements: finalRequirements.map((item, index) => ({
+        id: item.id || buildRequirementId(index),
+        requirement: item.requirement,
+        requirement_text: item.requirement_text,
+        category: item.category,
+        priority: item.priority,
+        source_section: item.source_section,
+        source_page: item.source_page,
+        source_text: item.source_text,
+        needs_evidence: item.needs_evidence,
+        expected_evidence_type: item.expected_evidence_type,
+        requirement_type: item.requirement_type,
+        compliance_status: item.compliance_status,
+      })),
+      inserted_requirements: insertedRequirements,
+      diagnostics,
       count: insertedRequirements.length,
     });
-
   } catch (err) {
     console.error("Critical failure during RFP analysis route:", err);
     return NextResponse.json({ error: "RFP Analysis system error: " + err.message }, { status: 500 });

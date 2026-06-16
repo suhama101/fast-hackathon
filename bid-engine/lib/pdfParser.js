@@ -9,10 +9,13 @@ export async function extractTextFromPDF(buffer) {
   let text = "";
 
   try {
-    // pdf-parse 1.1.1 — default export is a plain async function, no DOMMatrix
-    const pdfParse = (await import("pdf-parse")).default;
-    const result = await pdfParse(buffer);
-    text = result?.text || "";
+    const { PDFParse } = await import("pdf-parse");
+    const parser = new PDFParse(new Uint8Array(buffer));
+    const result = await parser.getText();
+    const pages = Array.isArray(result?.pages) ? result.pages : [];
+    text = pages.length
+      ? pages.map((page, index) => `[[PAGE ${index + 1}]]\n${page?.text || ""}`).join("\n\n")
+      : String(result?.text || "");
   } catch (err) {
     console.warn("pdf-parse failed, using regex fallback:", err.message);
     text = extractPdfTextViaRegex(buffer);

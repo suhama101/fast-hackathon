@@ -42,6 +42,43 @@ const pick = (row, keys, fallback = "") => {
   return fallback;
 };
 
+const tokenize = (value) =>
+  clean(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length > 2);
+
+const inferEvidenceTypes = (text) => {
+  const normalized = clean(text).toLowerCase();
+  const evidenceTypes = new Set(["Past Project"]);
+  if (/methodology|approach|implementation plan|delivery plan/.test(normalized)) evidenceTypes.add("Methodology");
+  if (/work plan|timeline|activity plan|schedule/.test(normalized)) evidenceTypes.add("Work Plan");
+  if (/certificate|certified|certification/.test(normalized)) evidenceTypes.add("Certification");
+  if (/cv|curriculum vitae|team profile/.test(normalized)) evidenceTypes.add("Team CV");
+  if (/legal declaration|disclosure|undertaking/.test(normalized)) evidenceTypes.add("Legal Declaration");
+  if (/financial statement|audit report|audited account/.test(normalized)) evidenceTypes.add("Financial Statement");
+  if (/tax registration|ntn|tax certificate/.test(normalized)) evidenceTypes.add("Tax Document");
+  if (/registration certificate|incorporation|secp/.test(normalized)) evidenceTypes.add("Registration Document");
+  if (/policy compliance|conflict of interest|related party|anti fraud|anti corruption/.test(normalized)) evidenceTypes.add("Policy Compliance");
+  return [...evidenceTypes];
+};
+
+const enrichCapability = (item) => {
+  const keywords = [...new Set(tokenize([item.project_name, item.description, item.domain, item.client_type, ...(item.skills || []), ...(item.certifications || [])].join(" ")))]
+    .slice(0, 24);
+  const evidenceTypes = item.evidence_types || inferEvidenceTypes([item.project_name, item.description, item.certification, ...(item.certifications || [])].join(" "));
+  return {
+    ...item,
+    sector: item.sector || item.client_type || item.domain || "General",
+    year: item.year_completed || item.year || null,
+    certification_name: item.certification || item.certification_name || (item.certifications || [])[0] || "",
+    keywords,
+    evidence_type: item.evidence_type || evidenceTypes[0] || "Past Project",
+    evidence_types: evidenceTypes,
+  };
+};
+
 const findHeaderIndex = (rows, requiredLabels) =>
   rows.findIndex((row) => {
     const labels = row.map((cell) => clean(cell).toLowerCase());
@@ -92,7 +129,7 @@ export function loadHackathonDataset(filePath = process.env.DATASET_XLSX_PATH ||
         contract_value: item.contract_value,
         duration_months: null,
         client_type: item.client_type,
-      })),
+      })).map(enrichCapability),
       bidHistory: BID_HISTORY.map((item) => ({
         bid_id: item.bid_id,
         client: "Sample Client",
@@ -142,7 +179,7 @@ export function loadHackathonDataset(filePath = process.env.DATASET_XLSX_PATH ||
     const domain = clean(row.domain) || "General";
     const summary = clean(row.project_summary);
     const certification = clean(row.certification) || "N/A";
-    return {
+    return enrichCapability({
       external_id: clean(row.cap_id),
       domain,
       project_name: summary.split(":")[0] || clean(row.cap_id) || "Capability Record",
@@ -155,7 +192,7 @@ export function loadHackathonDataset(filePath = process.env.DATASET_XLSX_PATH ||
       contract_value: clean(row.contract_value),
       duration_months: numberFromText(row.duration_months),
       client_type: clean(row.client_type) || "Unknown",
-    };
+    });
   });
 
   const bidHistory = bidObjects.map((row) => {
