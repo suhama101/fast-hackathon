@@ -5,6 +5,14 @@ import { requireAuthenticatedUser, requireWorkspaceOwner } from "../../../../lib
 const isUuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
 
+const buildEvidenceLockedContent = (sectionTitle, requirementText, matchedEvidence, matchStatus, expectedEvidenceType) => {
+  if (!matchedEvidence || matchStatus === "No Match") {
+    return `## ${sectionTitle}\n\nEvidence required: ${expectedEvidenceType || "supporting evidence"}. No strong supporting evidence was found in the capability library.\n`;
+  }
+
+  return `## ${sectionTitle}\n\nEvidence-backed response: ${matchedEvidence}\n\nThis section should be edited only within the bounds of the matched evidence above.\n`;
+};
+
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -180,13 +188,31 @@ Return ONLY valid JSON.`;
       ? aiResponse.drafts
       : draftTargets.map((section, index) => {
           const reference = evidenceByRequirement[index % evidenceByRequirement.length] || {};
-          const evidenceLine = reference.matched_evidence || reference.evidence_items?.[0]?.summary || reference.requirement_text || "No evidence available.";
+          const evidenceLine = reference.matched_evidence || reference.evidence_items?.[0]?.summary || "";
+          const matchStatus = String(reference.compliance_status || "").toLowerCase() === "pass" ? "Strong Match" : String(reference.compliance_status || "").toLowerCase() === "partial" ? "Partial Match" : "No Match";
           return {
             section_title: section.section_title,
             requirement_id: reference.requirement_id || section.id,
-            content: `## ${section.section_title}\n\nThis section is generated from the extracted requirements and matched evidence library.\n\nEvidence reference: ${evidenceLine}\n\nReview and refine the language before submission.`,
+            content: buildEvidenceLockedContent(section.section_title, reference.requirement_text, evidenceLine, matchStatus, reference.expected_evidence_type),
           };
         });
+
+    const lockedDrafts = draftsList.map((draft, index) => {
+      const reference = evidenceByRequirement[index % evidenceByRequirement.length] || {};
+      const evidenceLine = reference.matched_evidence || reference.evidence_items?.[0]?.summary || "";
+      const matchStatus = String(reference.compliance_status || "").toLowerCase() === "pass" ? "Strong Match" : String(reference.compliance_status || "").toLowerCase() === "partial" ? "Partial Match" : "No Match";
+      const safeContent = buildEvidenceLockedContent(
+        draft.section_title || "Proposal Response Section",
+        reference.requirement_text || draft.section_title,
+        evidenceLine,
+        matchStatus,
+        reference.expected_evidence_type
+      );
+      return {
+        ...draft,
+        content: matchStatus === "No Match" ? safeContent : `${safeContent}\n\n${String(draft.content || "").trim()}`,
+      };
+    });
 
     // 4. Pre-clear any old drafts for this workspace to avoid duplication in multiple runs
     await supabase
@@ -195,7 +221,7 @@ Return ONLY valid JSON.`;
       .eq("workspace_id", workspaceId);
 
     // Prepare rows for bulk insert
-    const insertRows = draftsList.map(item => ({
+    const insertRows = lockedDrafts.map(item => ({
       workspace_id: workspaceId,
       section_title: item.section_title || "Proposal Response Section",
       content: item.content || "Response placeholder under generation.",

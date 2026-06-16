@@ -108,7 +108,7 @@ Return JSON using arrays of short strings for all relevant fields:
 }
 
 RFP TEXT:
-${rawText.substring(0, 9000)}`;
+${rawText}`;
 
     const extractedData = await analyzeWithGroq(extractionPrompt, systemPrompt);
     if (!extractedData || extractedData.error) {

@@ -25,6 +25,29 @@ const SECTION_MARKERS = [
 
 const PAGE_MARKER_REGEX = /\[\[page\s+(\d+)\]\]|\bpage\s+(\d+)\b/i;
 
+const BOILERPLATE_PHRASES = [
+  "this rfp is only an invitation",
+  "does not confer any",
+  "responsible for conducting its own investigation",
+  "decision of the purchaser shall be final",
+  "provisions of this rfp shall prevail",
+  "indicative terms for the bidders",
+  "further details on the services required are provided",
+  "should check the accuracy, reliability and completeness",
+];
+
+const COMPLETE_CLAUSE_ENDINGS = [
+  /shall be$/i,
+  /must be$/i,
+  /should be$/i,
+  /required to$/i,
+  /need to$/i,
+  /consist of$/i,
+  /include$/i,
+  /provide$/i,
+  /submit$/i,
+];
+
 const CATEGORY_RULES = [
   {
     category: "Compliance",
@@ -178,8 +201,26 @@ const sentenceSplit = (text) =>
     .filter(Boolean);
 
 const likelyRequirement = (line) => {
-  if (line.length < 20 || line.length > 420) return false;
-  return /\b(must|shall|required|required to|should|need to|may not|must not|not exceed|at least|no later than|within|provide|submit|include|attach|demonstrate|validate|undertake|deliver|comply|evaluation|points?|marks?|weights?|desk review|presentation|email|address|hard copy|soft copy|courier|proposal validity|contract validity)\b/i.test(line);
+  if (line.length < 12 || line.length > 260) return false;
+  if (BOILERPLATE_PHRASES.some((phrase) => line.toLowerCase().includes(phrase))) return false;
+  if (COMPLETE_CLAUSE_ENDINGS.some((pattern) => pattern.test(line))) return false;
+
+  const tokenCount = cleanText(line).split(/\s+/).filter(Boolean).length;
+  const hasActionVerb = /\b(must|shall|required|required to|should|need to|may not|must not|not exceed|at least|no later than|within|provide|submit|include|attach|demonstrate|validate|undertake|deliver|comply|disclose|declare|initial|sign|register|maintain|participate|respond|quote|present|complete|attend|travel)\b/i.test(line);
+  const hasSpecificDetail = /\b(\d+%|\d+\s*(days?|weeks?|months?)|ntn|pkr|usd|email|address|proposal validity|page limit|hard copy|soft copy|blacklist|blacklisting|conflict of interest|related party|anti[-\s]?fraud|anti[-\s]?corruption|deliverable|evaluation criteria|scoring|deadline|closing date|submission)\b/i.test(line);
+
+  return tokenCount >= 4 && (hasActionVerb || hasSpecificDetail);
+};
+
+const requirementSpecificityScore = (line) => {
+  const text = cleanText(line);
+  let score = 0;
+  if (/\b(must|shall|required|required to|should|need to|may not|must not|not exceed|at least|no later than|within|provide|submit|include|attach|demonstrate|validate|undertake|deliver|comply|disclose|declare|initial|sign|register|maintain|participate|respond|quote|present|complete|attend|travel)\b/i.test(text)) score += 3;
+  if (/\b(\d+%|\d+\s*(days?|weeks?|months?)|ntn|pkr|usd|email|address|page limit|hard copy|soft copy|blacklist|conflict of interest|related party|anti[-\s]?fraud|anti[-\s]?corruption|deliverable|evaluation criteria|scoring|deadline|closing date|submission|proposal validity)\b/i.test(text)) score += 3;
+  if (/\b(eligibility|submission|technical proposal|financial proposal|evaluation criteria|scoring|deliverables|payment schedule|consortium|jv|legal|declaration|compliance|vendor|qualification)\b/i.test(text)) score += 2;
+  if (BOILERPLATE_PHRASES.some((phrase) => text.toLowerCase().includes(phrase))) score -= 4;
+  if (text.split(/\s+/).filter(Boolean).length < 6) score -= 1;
+  return score;
 };
 
 const createRequirement = ({ line, sectionName, pageNumber, sourceText, categoryHint }) => {
@@ -281,7 +322,17 @@ export function extractSectionAwareRequirements(rawText = "") {
     }
   });
 
-  return dedupeByKey(results, (item) => normalize(item.requirement));
+  return dedupeByKey(
+    results
+      .map((item) => ({
+        ...item,
+        _score: requirementSpecificityScore(item.requirement),
+      }))
+      .filter((item) => item._score >= 2)
+      .sort((left, right) => right._score - left._score || right.requirement.length - left.requirement.length)
+      .slice(0, 60),
+    (item) => normalize(item.requirement)
+  ).map(({ _score, ...item }) => item);
 }
 
 const FIELD_RULES = {
