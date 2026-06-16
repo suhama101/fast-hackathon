@@ -13,6 +13,26 @@ export const tokenize = (text) =>
 
 const unique = (values) => [...new Set(values)];
 
+const getRequirementCategory = (requirement = {}) =>
+  String(requirement.category || requirement.requirement_category || requirement.requirement_type || "mandatory").toLowerCase();
+
+const getMatchStatus = (requirement = {}) =>
+  String(requirement.match_status || requirement.compliance_status || "fail").toLowerCase();
+
+const estimateExpectedRequirementCount = (rawText = "", requirements = []) => {
+  const pageMarkers = String(rawText || "").match(/\[\[page\s+\d+\]\]/gi)?.length || 0;
+  const sectionMarkers = unique(
+    String(rawText || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => /^(section|chapter|part|schedule|annex|appendix)\s+[\w.-]+[:\-\s].*/i.test(line))
+  ).length;
+  const lengthBasedEstimate = pageMarkers > 0
+    ? (pageMarkers <= 10 ? 22 : pageMarkers <= 30 ? 45 : 70)
+    : (sectionMarkers >= 8 ? 45 : String(rawText || "").length >= 20000 ? 35 : 20);
+  return lengthBasedEstimate;
+};
+
 const numberFromText = (value) => {
   const match = String(value || "").replace(/,/g, "").match(/\d+(\.\d+)?/);
   return match ? Number(match[0]) : null;
@@ -164,23 +184,49 @@ export function calculateWinScore({ requirements = [], capabilities = [], bidHis
   const wins = historyBase.filter((bid) => String(bid.outcome).toLowerCase() === "win").length;
   const sectorWinRate = historyBase.length ? Math.round((wins / historyBase.length) * 100) : 50;
 
-  // Bug 4 fix: use real pass/partial/fail counts from actual requirements
-  const mandatory = requirements.filter((req) => req.requirement_type === "mandatory");
-  const mandatoryPassed = mandatory.filter((req) => req.compliance_status === "pass").length;
-  const mandatoryPartial = mandatory.filter((req) => req.compliance_status === "partial").length;
+  const normalizedRequirements = requirements.map((req) => ({
+    ...req,
+    category: req.category || req.requirement_category || req.requirement_type,
+    match_status: req.match_status || (req.compliance_status === "pass" ? "Strong Match" : req.compliance_status === "partial" ? "Partial Match" : "No Match"),
+  }));
+
+  const mandatory = normalizedRequirements.filter((req) => /mandatory|legal|compliance|eligibility|submission/i.test(getRequirementCategory(req)));
+  const evaluationRequirements = normalizedRequirements.filter((req) => /evaluation|scoring/i.test(getRequirementCategory(req)));
+  const deadlineRequirements = normalizedRequirements.filter((req) => /deadline|submission/i.test(getRequirementCategory(req)));
+
+  const strongCount = normalizedRequirements.filter((req) => getMatchStatus(req) === "strong match" || getMatchStatus(req) === "pass").length;
+  const partialCount = normalizedRequirements.filter((req) => getMatchStatus(req) === "partial match" || getMatchStatus(req) === "partial").length;
+  const noMatchCount = normalizedRequirements.filter((req) => getMatchStatus(req) === "no match" || getMatchStatus(req) === "fail").length;
+
+  const mandatoryPassed = mandatory.filter((req) => getMatchStatus(req) === "strong match" || getMatchStatus(req) === "pass").length;
+  const mandatoryPartial = mandatory.filter((req) => getMatchStatus(req) === "partial match" || getMatchStatus(req) === "partial").length;
+  const mandatoryFailed = mandatory.length - mandatoryPassed - mandatoryPartial;
   const mandatoryTotal = mandatory.length;
 
-  // compliance_score is the primary driver: based on actual pass vs total mandatory
-  const complianceScore = mandatoryTotal > 0
+  const criticalCompliancePassRate = mandatoryTotal > 0
     ? Math.round(((mandatoryPassed + mandatoryPartial * 0.5) / mandatoryTotal) * 100)
-    : Math.round(historyBase.reduce((sum, bid) => sum + Number(bid.compliance_percent || 0), 0) / Math.max(1, historyBase.length)) || 70;
+    : 0;
 
-  // capability_match covers all requirements (mandatory + evaluation)
-  const passed = requirements.filter((req) => req.compliance_status === "pass").length;
-  const partial = requirements.filter((req) => req.compliance_status === "partial").length;
-  const capabilityMatch = requirements.length
-    ? Math.round(((passed + partial * 0.55) / requirements.length) * 100)
-    : Math.min(90, Math.round((capabilities.length / 50) * 100));
+  const evidenceCoverage = normalizedRequirements.length
+    ? Math.round(((strongCount + partialCount * 0.5) / normalizedRequirements.length) * 100)
+    : 0;
+
+  const strongEvidenceCoverage = normalizedRequirements.length
+    ? Math.round((strongCount / normalizedRequirements.length) * 100)
+    : 0;
+
+  const partialEvidenceCoverage = normalizedRequirements.length
+    ? Math.round((partialCount / normalizedRequirements.length) * 100)
+    : 0;
+
+  const evaluationAlignment = Math.min(100, evaluationRequirements.length * 25);
+  const deadlineSubmissionReadiness = Math.min(100, (deadlineRequirements.length + normalizedRequirements.filter((req) => /submission/i.test(getRequirementCategory(req))).length) * 10);
+
+  const expectedRequirementCount = estimateExpectedRequirementCount(rawText, normalizedRequirements);
+  const requirementExtractionCoverageConfidence = Math.max(
+    0,
+    Math.min(100, Math.round((normalizedRequirements.length / Math.max(1, expectedRequirementCount)) * 100))
+  );
 
   const avgHistoryScore = historyBase.length
     ? Math.round(historyBase.reduce((sum, bid) => sum + Number(bid.score_percent || 0), 0) / historyBase.length)
@@ -215,46 +261,59 @@ export function calculateWinScore({ requirements = [], capabilities = [], bidHis
     : 65;
 
   const similarExperienceScore = Math.min(100, Math.round((capabilities.filter((cap) => cap.domain === sector).length / Math.max(1, capabilities.length)) * 220));
+  const riskPenaltyScore = Math.min(12, Math.round((noMatchCount / Math.max(1, normalizedRequirements.length)) * 12 + (mandatoryFailed > 0 ? 3 : 0)));
+
   const totalScore = Math.round(
-    sectorWinRate * 0.2 +
-    avgHistoryScore * 0.18 +
-    capabilityMatch * 0.22 +
-    complianceScore * 0.18 +
-    budgetAlignment * 0.12 +
-    technicalHistory * 0.05 +
-    commercialHistory * 0.03 +
-    strategicFit * 0.04 -
-    Math.min(12, riskPenalty * 0.35)
+    requirementExtractionCoverageConfidence * 0.15 +
+    strongEvidenceCoverage * 0.25 +
+    partialEvidenceCoverage * 0.10 +
+    criticalCompliancePassRate * 0.20 +
+    evaluationAlignment * 0.15 +
+    deadlineSubmissionReadiness * 0.10 +
+    Math.max(0, 100 - riskPenaltyScore * (100 / 12)) * 0.05
   );
 
-  const clampedTotal = Math.max(0, Math.min(100, totalScore));
+  const clampedTotal = Math.max(0, Math.min(100, Math.round(totalScore - riskPenaltyScore)));
 
-  // GO/NO-GO is driven by compliance score (pass_count / total_mandatory):
-  // If compliance_score >= 70 → GO, otherwise → NO-GO
-  const decision = complianceScore >= 70 ? "GO" : "NO-GO";
+  const criticalBlockerExists = mandatory.some((req) => getMatchStatus(req) === "no match" || getMatchStatus(req) === "fail");
+  const evidenceCoverageSufficient = (strongEvidenceCoverage + partialEvidenceCoverage) >= 70;
+  const decision = (!criticalBlockerExists && evidenceCoverageSufficient && criticalCompliancePassRate >= 80) ? "GO" : "NO-GO";
   const decisionReasoning = decision === "GO"
-    ? `Compliance is at ${complianceScore}% and the evidence profile clears the submission threshold.`
-    : `Compliance is at ${complianceScore}% which is below the 70% GO threshold.`;
+    ? `Requirement coverage is ${requirementExtractionCoverageConfidence}%, evidence coverage is ${strongEvidenceCoverage + partialEvidenceCoverage}%, and critical compliance is ${criticalCompliancePassRate}%.`
+    : `NO-GO because ${criticalBlockerExists ? "a critical mandatory/legal/compliance blocker has No Match" : "evidence coverage is below threshold"} and critical compliance is ${criticalCompliancePassRate}%.`;
 
   return {
     sector,
     total_score: clampedTotal,
+    score_components: {
+      requirement_extraction_coverage_confidence: requirementExtractionCoverageConfidence,
+      strong_evidence_coverage: strongEvidenceCoverage,
+      partial_evidence_coverage: partialEvidenceCoverage,
+      critical_compliance_pass_rate: criticalCompliancePassRate,
+      evaluation_alignment: evaluationAlignment,
+      deadline_submission_readiness: deadlineSubmissionReadiness,
+      risk_penalty_score: riskPenaltyScore,
+    },
     budget_alignment: Math.round(budgetAlignment),
-    capability_match: capabilityMatch,
-    compliance_score: complianceScore,
+    capability_match: evidenceCoverage,
+    compliance_score: criticalCompliancePassRate,
     sector_win_rate: sectorWinRate,
     similar_experience_score: similarExperienceScore,
     evaluation_history_score: avgHistoryScore,
     technical_history_score: technicalHistory,
     commercial_history_score: commercialHistory,
     strategic_fit_score: strategicFit,
-    risk_penalty_score: Math.min(100, riskPenalty),
+    risk_penalty_score: Math.min(100, riskPenaltyScore),
     decision,
     decision_reasoning: decisionReasoning,
     // Expose raw counts for transparency in the UI
     mandatory_total: mandatoryTotal,
     mandatory_passed: mandatoryPassed,
     mandatory_partial: mandatoryPartial,
-    mandatory_failed: mandatoryTotal - mandatoryPassed - mandatoryPartial,
+    mandatory_failed: mandatoryFailed,
+    strong_matches: strongCount,
+    partial_matches: partialCount,
+    no_matches: noMatchCount,
+    extraction_coverage_confidence: requirementExtractionCoverageConfidence,
   };
 }

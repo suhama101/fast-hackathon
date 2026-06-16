@@ -10,6 +10,10 @@ const buildEvidenceLockedContent = (sectionTitle, requirementText, matchedEviden
     return `## ${sectionTitle}\n\nEvidence required: ${expectedEvidenceType || "supporting evidence"}. No strong supporting evidence was found in the capability library.\n`;
   }
 
+  if (matchStatus === "Partial Match") {
+    return `## ${sectionTitle}\n\nOur existing experience partially supports this requirement; however, additional evidence is recommended before final submission.\n\nEvidence reference: ${matchedEvidence}\n`;
+  }
+
   return `## ${sectionTitle}\n\nEvidence-backed response: ${matchedEvidence}\n\nThis section should be edited only within the bounds of the matched evidence above.\n`;
 };
 
@@ -208,9 +212,16 @@ Return ONLY valid JSON.`;
         matchStatus,
         reference.expected_evidence_type
       );
+      const normalizedContent = String(draft.content || "")
+        .replace(/we confirm our ability/gi, "We have demonstrated experience")
+        .replace(/holds? [^.\n]* capacity/gi, "has partial supporting evidence")
+        .trim();
+      const appendedContent = matchStatus === "Strong Match" && normalizedContent
+        ? `\n\n${normalizedContent}`
+        : "";
       return {
         ...draft,
-        content: matchStatus === "No Match" ? safeContent : `${safeContent}\n\n${String(draft.content || "").trim()}`,
+        content: matchStatus === "No Match" ? safeContent : `${safeContent}${appendedContent}`,
       };
     });
 

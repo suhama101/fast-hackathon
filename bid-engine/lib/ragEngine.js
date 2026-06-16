@@ -186,9 +186,9 @@ const scoreCapability = (requirementText, requirementMeta, capability) => {
   };
 };
 
-const buildEvidenceStatus = (score, typeScore, keywordScore) => {
-  if (score >= 0.75 && typeScore >= 0.6 && keywordScore >= 0.15) return "Strong Match";
-  if (score >= 0.55 && score < 0.75 && (typeScore >= 0.4 || keywordScore >= 0.15)) return "Partial Match";
+const buildEvidenceStatus = (score, typeScore, keywordScore, matchedTokens = []) => {
+  if (score >= 0.8 && typeScore >= 0.75 && keywordScore >= 0.2 && matchedTokens.length >= 2) return "Strong Match";
+  if (score >= 0.2 && score < 0.8 && typeScore > 0 && (keywordScore >= 0.02 || matchedTokens.length >= 1)) return "Partial Match";
   return "No Match";
 };
 
@@ -255,7 +255,7 @@ export const retrieveCapabilityEvidence = (requirement, capabilities = [], optio
     .sort((left, right) => right.score - left.score);
 
   const best = ranked[0] || null;
-  const matchStatus = best ? buildEvidenceStatus(best.score, best.typeScore, best.keywordScore) : "No Match";
+  const matchStatus = best ? buildEvidenceStatus(best.score, best.typeScore, best.keywordScore, best.matchedTokens) : "No Match";
   const confidence = best ? Math.round(best.score * 100) : 0;
 
   if (!best || matchStatus === "No Match") {
@@ -278,8 +278,8 @@ export const retrieveCapabilityEvidence = (requirement, capabilities = [], optio
   }
 
   const matchReason = matchStatus === "Strong Match"
-    ? `Strong evidence-type alignment (${best.typeScore.toFixed(2)}) and keyword overlap (${best.keywordScore.toFixed(2)}).`
-    : `Partial evidence alignment. Similarity is present but the evidence is incomplete or indirect.`;
+    ? `Direct evidence alignment (${best.typeScore.toFixed(2)}) with meaningful keyword overlap (${best.keywordScore.toFixed(2)}).`
+    : `Evidence is related but not definitive. The match is indirect and does not fully prove the requirement.`;
 
   return {
     compliance_status: matchStatus === "Strong Match" ? "pass" : "partial",
