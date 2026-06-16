@@ -55,6 +55,7 @@ export default function DashboardPage() {
   const [reviewResult, setReviewResult] = useState(null);
 
   const [ratingAnalysis, setRatingAnalysis] = useState(null);
+  const [runtimeDebug, setRuntimeDebug] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isMatching, setIsMatching] = useState(false);
   const [isDrafting, setIsDrafting] = useState(false);
@@ -384,6 +385,7 @@ export default function DashboardPage() {
     setAlert({ type: "success", text: "Running full pipeline: Analyze → Match → Draft → Review → Score..." });
     setReviewResult(null);
     setRatingAnalysis(null);
+    setRuntimeDebug(null);
 
     try {
       let workspace = selectedWorkspaceId
@@ -409,6 +411,24 @@ export default function DashboardPage() {
       });
 
       const parsedReqs = buildRequirementsFromAnalyze(analyzeData.requirements || []);
+      const sectionCounts = parsedReqs.reduce((accumulator, requirement) => {
+        const section = requirement.sourceSection || "Unknown Section";
+        accumulator[section] = (accumulator[section] || 0) + 1;
+        return accumulator;
+      }, {});
+      const analysisDebug = {
+        fileName: workspace.title,
+        rawTextLength: text.length,
+        sectionCount: Object.keys(sectionCounts).length,
+        requirementsBySection: sectionCounts,
+        finalRequirementCount: parsedReqs.length,
+        firstFiveRequirements: parsedReqs.slice(0, 5).map((item) => ({
+          id: item.id,
+          requirement: item.description || item.title,
+          source_section: item.sourceSection,
+          source_text: item.sourceText,
+        })),
+      };
       setRequirements(parsedReqs);
       setSelectedRequirement(parsedReqs[0] || null);
       setProposalDrafts([]);
@@ -444,7 +464,35 @@ export default function DashboardPage() {
           source: match.source || "",
         };
       });
-      setMatchMatrix(nextMatrix);
+      const ragSamples = (matchData.matches || []).slice(0, 8).map((match) => ({
+        requirement_id: match.requirement_id,
+        requirement: match.requirement,
+        expected_evidence_type: match.expected_evidence_type,
+        evidence_type: match.evidence_type,
+        match_score: match.match_score || 0,
+        match_status: match.match_status || "No Match",
+        reason: match.reason || match.reasoning || "",
+      }));
+      setMatchMatrix({
+        ...nextMatrix,
+        __debug: {
+          ...analysisDebug,
+          ragSamples,
+          scoreComponents: scoreData?.record?.score_components || scoreData?.scores?.score_components || {},
+          scoreSummary: {
+            totalScore: scoreData?.record?.total_score || scoreData?.scores?.total_score || 0,
+            decision: scoreData?.record?.decision || scoreData?.scores?.decision || "NO-GO",
+            decisionReasoning: scoreData?.record?.decision_reasoning || scoreData?.scores?.decision_reasoning || "",
+            strongMatches: scoreData?.record?.strong_matches || scoreData?.scores?.strong_matches || 0,
+            partialMatches: scoreData?.record?.partial_matches || scoreData?.scores?.partial_matches || 0,
+            noMatches: scoreData?.record?.no_matches || scoreData?.scores?.no_matches || 0,
+          },
+        },
+      });
+      setRuntimeDebug({
+        ...analysisDebug,
+        ragSamples,
+      });
       setRequirements((current) => current.map((req) => {
         const match = (matchData.matches || []).find((item) => item.requirement_id === req.id);
         return match ? { ...req, status: match.compliance_status } : req;
@@ -480,6 +528,7 @@ export default function DashboardPage() {
       });
       if (scoreData.record || scoreData.scores) {
         const scoreRecord = scoreData.record || scoreData.scores;
+        const scoreComponents = scoreRecord.score_components || scoreData.scores?.score_components || {};
         setRatingAnalysis({
           winScore: scoreRecord.total_score,
           benchmarks: {
@@ -499,7 +548,23 @@ export default function DashboardPage() {
             `Similar experience score: ${scoreRecord.similar_experience_score || scoreData.scores?.similar_experience_score || 0}%.`,
             `Mandatory compliance: ${scoreRecord.mandatory_passed || 0} passed / ${scoreRecord.mandatory_total || 0} total mandatory requirements.`,
           ],
+          score_components: scoreComponents,
+          strong_matches: scoreRecord.strong_matches || scoreData.scores?.strong_matches || 0,
+          partial_matches: scoreRecord.partial_matches || scoreData.scores?.partial_matches || 0,
+          no_matches: scoreRecord.no_matches || scoreData.scores?.no_matches || 0,
         });
+        setRuntimeDebug((current) => ({
+          ...(current || {}),
+          scoreComponents,
+          scoreSummary: {
+            totalScore: scoreRecord.total_score,
+            decision: scoreRecord.decision,
+            decisionReasoning: scoreRecord.decision_reasoning || scoreData.scores?.decision_reasoning || "",
+            strongMatches: scoreRecord.strong_matches || scoreData.scores?.strong_matches || 0,
+            partialMatches: scoreRecord.partial_matches || scoreData.scores?.partial_matches || 0,
+            noMatches: scoreRecord.no_matches || scoreData.scores?.no_matches || 0,
+          },
+        }));
       }
 
       setActiveTab("score");
@@ -605,12 +670,30 @@ export default function DashboardPage() {
           needsEvidence: item.needs_evidence !== false,
           expectedEvidenceType: item.expected_evidence_type || "",
         }));
+        const sectionCounts = parsedReqs.reduce((accumulator, requirement) => {
+          const section = requirement.sourceSection || "Unknown Section";
+          accumulator[section] = (accumulator[section] || 0) + 1;
+          return accumulator;
+        }, {});
         setRequirements(parsedReqs);
         setSelectedRequirement(parsedReqs[0]);
         setProposalDrafts([]);
         setActiveDraftIdx(0);
         setEditedDraftValue("");
         setReviewResult(null);
+        setRuntimeDebug({
+          fileName: uploadMeta.fileName || workspace.title,
+          rawTextLength: text.length,
+          sectionCount: Object.keys(sectionCounts).length,
+          requirementsBySection: sectionCounts,
+          finalRequirementCount: parsedReqs.length,
+          firstFiveRequirements: parsedReqs.slice(0, 5).map((item) => ({
+            id: item.id,
+            requirement: item.description || item.title,
+            source_section: item.sourceSection,
+            source_text: item.sourceText,
+          })),
+        });
       } else {
         setRequirements([]);
         setSelectedRequirement(null);
@@ -676,7 +759,28 @@ export default function DashboardPage() {
             source: match.source || "",
           };
         });
-        setMatchMatrix(nextMatrix);
+        setMatchMatrix({
+          ...nextMatrix,
+          __debug: {
+            fileName: selectedWorkspaceId,
+            rawTextLength: rfpText.length,
+            sectionCount: Object.keys(requirements.reduce((accumulator, requirement) => {
+              const section = requirement.sourceSection || "Unknown Section";
+              accumulator[section] = (accumulator[section] || 0) + 1;
+              return accumulator;
+            }, {})).length,
+            finalRequirementCount: requirements.length,
+            ragSamples: data.matches.slice(0, 8).map((match) => ({
+              requirement_id: match.requirement_id,
+              requirement: match.requirement,
+              expected_evidence_type: match.expected_evidence_type,
+              evidence_type: match.evidence_type,
+              match_score: match.match_score || 0,
+              match_status: match.match_status || "No Match",
+              reason: match.reason || match.reasoning || "",
+            })),
+          },
+        });
         setRequirements((current) => current.map((req) => {
           const match = data.matches.find((item) => item.requirement_id === req.id);
           return match ? { ...req, status: match.compliance_status } : req;
@@ -1081,6 +1185,7 @@ export default function DashboardPage() {
               onPredictScore={executePredictScore}
               isPredicting={isPredicting}
               requirements={requirements}
+              runtimeDebug={runtimeDebug}
             />
           )}
 

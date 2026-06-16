@@ -8,7 +8,8 @@ export default function WinScoreDashboard({
   ratingAnalysis = null,
   onPredictScore,
   isPredicting,
-  requirements = []
+  requirements = [],
+  runtimeDebug = null
 }) {
   const analysis = ratingAnalysis;
   const winScore = Number(analysis?.winScore || 0);
@@ -213,6 +214,32 @@ export default function WinScoreDashboard({
                   ))}
                 </ul>
               </div>
+
+              {runtimeDebug?.scoreSummary && (
+                <div className="rounded-lg border border-purple-950/20 bg-[#1a1a2e]/35 p-3">
+                  <div className="text-[10px] font-mono uppercase tracking-wider text-purple-300 mb-2">Live Score Debug</div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+                    <div className="rounded-md bg-[#0a0a0f]/70 border border-purple-950/10 p-2">
+                      <div className="text-slate-500 uppercase font-mono">Total</div>
+                      <div className="text-slate-200 mt-1">{runtimeDebug.scoreSummary.totalScore}%</div>
+                    </div>
+                    <div className="rounded-md bg-[#0a0a0f]/70 border border-purple-950/10 p-2">
+                      <div className="text-slate-500 uppercase font-mono">Decision</div>
+                      <div className="text-slate-200 mt-1">{runtimeDebug.scoreSummary.decision}</div>
+                    </div>
+                    <div className="rounded-md bg-[#0a0a0f]/70 border border-purple-950/10 p-2">
+                      <div className="text-slate-500 uppercase font-mono">Strong/Partial/No</div>
+                      <div className="text-slate-200 mt-1">
+                        {runtimeDebug.scoreSummary.strongMatches}/{runtimeDebug.scoreSummary.partialMatches}/{runtimeDebug.scoreSummary.noMatches}
+                      </div>
+                    </div>
+                    <div className="rounded-md bg-[#0a0a0f]/70 border border-purple-950/10 p-2">
+                      <div className="text-slate-500 uppercase font-mono">Reason</div>
+                      <div className="text-slate-200 mt-1">{String(runtimeDebug.scoreSummary.decisionReasoning || "").slice(0, 100)}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

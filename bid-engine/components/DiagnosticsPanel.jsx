@@ -97,6 +97,68 @@ export default function DiagnosticsPanel({ requirements = [], matchMatrix = {} }
         </div>
       </div>
 
+      {matchMatrix.__debug && (
+        <div className="rounded-xl border border-purple-950/20 bg-[#0a0a0f]/70 p-4 space-y-4">
+          <h4 className="text-sm font-bold text-white">Runtime Debug</h4>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+            <div className="rounded-lg border border-purple-950/20 bg-[#1a1a2e]/40 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-slate-500 font-mono">File</div>
+              <div className="mt-1 text-slate-200 break-all">{matchMatrix.__debug.fileName || "Unknown file"}</div>
+            </div>
+            <div className="rounded-lg border border-purple-950/20 bg-[#1a1a2e]/40 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-slate-500 font-mono">Raw Text</div>
+              <div className="mt-1 text-slate-200">{matchMatrix.__debug.rawTextLength || 0} chars</div>
+            </div>
+            <div className="rounded-lg border border-purple-950/20 bg-[#1a1a2e]/40 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-slate-500 font-mono">Sections</div>
+              <div className="mt-1 text-slate-200">{matchMatrix.__debug.sectionCount || 0}</div>
+            </div>
+            <div className="rounded-lg border border-purple-950/20 bg-[#1a1a2e]/40 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-slate-500 font-mono">Final Count</div>
+              <div className="mt-1 text-slate-200">{matchMatrix.__debug.finalRequirementCount || 0}</div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-purple-950/20 bg-[#1a1a2e]/40 p-3">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-mono mb-2">First 5 Requirement Sources</div>
+            <div className="space-y-2">
+              {(matchMatrix.__debug.firstFiveRequirements || []).slice(0, 5).map((item, index) => (
+                <div key={`${item.id || index}`} className="text-[11px] text-slate-300">
+                  <span className="font-mono text-purple-300">{item.id || `REQ-${index + 1}`}</span>{" "}
+                  — {item.source_section || "Unknown"} — {String(item.source_text || item.requirement || "").slice(0, 140)}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-purple-950/20 bg-[#1a1a2e]/40 p-3">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-mono mb-2">Score Components</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+              {Object.entries(matchMatrix.__debug.scoreComponents || {}).map(([key, value]) => (
+                <div key={key} className="rounded-md bg-[#0a0a0f]/70 border border-purple-950/10 p-2">
+                  <div className="text-slate-500 font-mono uppercase">{key.replace(/_/g, " ")}</div>
+                  <div className="text-slate-200 mt-1">{String(value)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-purple-950/20 bg-[#1a1a2e]/40 p-3">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-mono mb-2">RAG Samples</div>
+            <div className="space-y-2 max-h-48 overflow-auto pr-1">
+              {(matchMatrix.__debug.ragSamples || []).slice(0, 5).map((item, index) => (
+                <div key={`${item.requirement_id || index}`} className="rounded-md border border-purple-950/10 bg-[#0a0a0f]/70 p-2 text-[11px] text-slate-300">
+                  <div className="font-mono text-purple-300">{item.requirement_id || `REQ-${index + 1}`}</div>
+                  <div className="mt-1">Expected: {item.expected_evidence_type || "Unknown"}</div>
+                  <div>Match: {item.match_status || "No Match"} · Score: {Math.round(Number(item.match_score || 0) * 100)}%</div>
+                  <div className="mt-1 text-slate-400">{String(item.reason || "").slice(0, 180)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="rounded-xl border border-purple-950/20 bg-[#0a0a0f]/70 p-4">
           <h4 className="text-sm font-bold text-white mb-3">Requirements by Category</h4>
