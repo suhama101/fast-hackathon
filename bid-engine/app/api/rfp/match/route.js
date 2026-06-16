@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { loadHackathonDataset } from "../../../../lib/datasetLoader";
-import { matchRequirementToCapabilities } from "../../../../lib/datasetAnalysis";
+import { buildCapabilityIndex, retrieveCapabilityEvidence } from "../../../../lib/ragEngine";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../../../../lib/requestAuth";
 
 const isUuid = (value) =>
@@ -80,67 +80,25 @@ export async function POST(request) {
         .slice(0, 10),
     };
 
+    const capabilityIndex = buildCapabilityIndex(capabilities);
+
     const matches = requirements.map((requirement, index) => {
       const normalized = normalizeRequirement(requirement, index);
-      const reqText = normalized.requirement_text;
-
-      // Ratio-based keyword matching against full capability corpus
-      const reqWords = reqText.toLowerCase().split(/\s+/).filter(w => w.length > 4);
-
-      // Find best individual capability match
-      let bestMatch = null;
-      let maxScore = -1;
-
-      capabilities.forEach(c => {
-        const summary = c.project_summary || c.description || '';
-        const certs = Array.isArray(c.certifications) ? c.certifications.join(' ') : String(c.certifications || c.certification || '');
-        const skills = Array.isArray(c.skills) ? c.skills.join(' ') : String(c.skills || '');
-        const domain = c.domain || '';
-        const text = `${summary} ${certs} ${skills} ${domain}`.toLowerCase();
-
-        const score = reqWords.filter(word => text.includes(word)).length;
-        if (score > maxScore) {
-          maxScore = score;
-          bestMatch = c;
-        }
+      const evidence = retrieveCapabilityEvidence(normalized, capabilityIndex, {
+        topK: 3,
+        entities: entityContext,
       });
-
-      // Build combined capability text for ratio calculation
-      const capabilityText = capabilities.map(c => {
-        const summary = c.project_summary || c.description || '';
-        const certs = Array.isArray(c.certifications) ? c.certifications.join(' ') : String(c.certifications || c.certification || '');
-        const skills = Array.isArray(c.skills) ? c.skills.join(' ') : String(c.skills || '');
-        const domain = c.domain || '';
-        return `${summary} ${certs} ${skills} ${domain}`;
-      }).join(' ').toLowerCase();
-
-      const matchedWords = reqWords.filter(word => capabilityText.includes(word));
-      const matchRatio = reqWords.length > 0 ? matchedWords.length / reqWords.length : 0;
-
-      let status;
-      if (matchRatio >= 0.4) status = 'pass';
-      else if (matchRatio >= 0.15) status = 'partial';
-      else status = 'fail';
-
-      const confidence = bestMatch && reqWords.length > 0
-        ? Math.min(100, Math.round((maxScore / reqWords.length) * 100))
-        : 0;
-
-      const evidence = bestMatch
-        ? `${bestMatch.external_id || bestMatch.id || 'CAP'}: ${bestMatch.project_summary || bestMatch.description || bestMatch.project_name}`
-        : "No capability evidence found.";
-
-      const reasoning = bestMatch && maxScore > 0
-        ? `Matched ${maxScore} key terms (ratio: ${Math.round(matchRatio * 100)}%) with project: ${bestMatch.project_name || 'unnamed'}.`
-        : "No matching terms found in capability library.";
 
       return {
         requirement_id: normalized.id,
         requirement_text: normalized.requirement_text,
-        compliance_status: status,
-        confidence_score: confidence,
-        evidence,
-        reasoning,
+        compliance_status: evidence.compliance_status,
+        confidence_score: evidence.confidence_score,
+        evidence: evidence.evidence,
+        evidence_items: evidence.evidence_items,
+        source_references: evidence.source_references,
+        matched_terms: evidence.matched_terms,
+        reasoning: evidence.reasoning,
       };
     });
 
@@ -148,15 +106,15 @@ export async function POST(request) {
       await Promise.all(matches.map((match) =>
         supabase
           .from("rfp_requirements")
-          .update({
-            compliance_status: match.compliance_status,
-            extracted_value: match.evidence,
-            matched_evidence: match.evidence,
-            match_confidence: match.confidence_score,
-            match_reasoning: match.reasoning,
-          })
-          .eq("id", match.requirement_id)
-          .eq("workspace_id", workspaceId)
+        .update({
+          compliance_status: match.compliance_status,
+          extracted_value: match.evidence,
+          matched_evidence: match.evidence,
+          match_confidence: match.confidence_score,
+          match_reasoning: match.reasoning,
+        })
+        .eq("id", match.requirement_id)
+        .eq("workspace_id", workspaceId)
       ));
     }
 
@@ -169,6 +127,7 @@ export async function POST(request) {
         matched_evidence: match?.evidence,
         match_confidence: match?.confidence_score,
         match_reasoning: match?.reasoning,
+        evidence_items: match?.evidence_items || [],
       };
     });
 

@@ -7,6 +7,7 @@ import FileUpload from "../../components/FileUpload";
 import RequirementsList from "../../components/RequirementsList";
 import ComplianceChecker from "../../components/ComplianceChecker";
 import ProposalDraft from "../../components/ProposalDraft";
+import ReviewerPanel from "../../components/ReviewerPanel";
 import WinScoreDashboard from "../../components/WinScoreDashboard";
 import { 
   Laptop, 
@@ -50,14 +51,17 @@ export default function DashboardPage() {
   const [proposalDrafts, setProposalDrafts] = useState([]);
   const [activeDraftIdx, setActiveDraftIdx] = useState(0);
   const [editedDraftValue, setEditedDraftValue] = useState("");
+  const [reviewResult, setReviewResult] = useState(null);
 
   const [ratingAnalysis, setRatingAnalysis] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isMatching, setIsMatching] = useState(false);
   const [isDrafting, setIsDrafting] = useState(false);
+  const [isReviewing, setIsReviewing] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isPredicting, setIsPredicting] = useState(false);
+  const [isProcessingPipeline, setIsProcessingPipeline] = useState(false);
   const [alert, setAlert] = useState(null);
 
   const getAuthHeaders = (headers = {}) => {
@@ -196,6 +200,38 @@ export default function DashboardPage() {
     status: draft.status || "ai_generated",
   });
 
+  const mapReviewResult = (data) => ({
+    weak_sections: data?.weak_sections || [],
+    unsupported_claims: data?.unsupported_claims || [],
+    missing_compliance_points: data?.missing_compliance_points || [],
+    vague_language: data?.vague_language || [],
+    formatting_issues: data?.formatting_issues || [],
+    suggestions: data?.suggestions || [],
+    improved_proposal: data?.improved_proposal || "",
+    final_recommendation: data?.final_recommendation || "NO-GO",
+    rationale: data?.rationale || "",
+    final_proposal: data?.improved_proposal || "",
+  });
+
+  const buildRequirementsFromAnalyze = (items = []) =>
+    items.map((item, idx) => ({
+      id: item.id || `REQ-${String(idx + 1).padStart(3, "0")}`,
+      title: item.requirement_text?.slice(0, 40) || "Extracted Criteria",
+      category: item.requirement_type === "mandatory" ? "Security" : "Technical",
+      severity: item.requirement_type === "mandatory" ? "Critical" : "Important",
+      status: item.compliance_status || "partial",
+      description: item.requirement_text,
+    }));
+
+  const fetchJson = async (url, options = {}) => {
+    const response = await fetch(url, options);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `Request failed for ${url}`);
+    }
+    return data;
+  };
+
   const loadDrafts = async (workspaceId = selectedWorkspaceId) => {
     if (!workspaceId) return;
     const response = await fetch(`/api/rfp/draft?workspaceId=${encodeURIComponent(workspaceId)}`, {
@@ -282,6 +318,7 @@ export default function DashboardPage() {
 
       const drafts = (data.drafts || []).map(mapDraft);
       setProposalDrafts(drafts);
+      setReviewResult(null);
       
       // Select the index of the generated draft that matches this requirement
       const reqText = params.requirement?.description || params.requirement?.requirement_text || "";
@@ -301,6 +338,168 @@ export default function DashboardPage() {
       setAlert({ type: "error", text: `Draft generation failed: ${err.message}` });
     } finally {
       setIsDrafting(false);
+    }
+  };
+
+  const handleReviewProposal = async () => {
+    if (!selectedWorkspaceId) {
+      setAlert({ type: "error", text: "Analyze an RFP and generate a draft before running the reviewer." });
+      return;
+    }
+
+    setIsReviewing(true);
+    setAlert(null);
+    try {
+      const response = await fetch("/api/rfp/review", {
+        method: "POST",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ workspaceId: selectedWorkspaceId }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Unable to review proposal.");
+
+      const mappedReview = mapReviewResult(data.review || data);
+      setReviewResult(mappedReview);
+      setAlert({ type: "success", text: `Reviewer agent completed the final quality pass. Recommendation: ${mappedReview.final_recommendation}.` });
+    } catch (err) {
+      setAlert({ type: "error", text: `Reviewer pass failed: ${err.message}` });
+    } finally {
+      setIsReviewing(false);
+    }
+  };
+
+  const handleRunFullPipeline = async () => {
+    if (!rfpText.trim()) {
+      setAlert({ type: "error", text: "Upload or paste an RFP before running the full pipeline." });
+      return;
+    }
+
+    setIsProcessingPipeline(true);
+    setAlert({ type: "success", text: "Running full pipeline: Analyze → Match → Draft → Review → Score..." });
+    setReviewResult(null);
+    setRatingAnalysis(null);
+
+    try {
+      let workspace = selectedWorkspaceId
+        ? workspaces.find((item) => item.id === selectedWorkspaceId) || { id: selectedWorkspaceId, title: inferWorkspaceTitle(rfpText) }
+        : null;
+
+      if (!workspace?.id) {
+        workspace = await createWorkspace({
+          title: inferWorkspaceTitle(rfpText),
+          rawText: rfpText,
+          status: "analyzing",
+        });
+      }
+
+      const analyzeData = await fetchJson("/api/rfp/analyze", {
+        method: "POST",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          rawText: rfpText,
+          workspaceId: workspace.id,
+          bidTitle: workspace.title,
+        }),
+      });
+
+      const parsedReqs = buildRequirementsFromAnalyze(analyzeData.requirements || []);
+      setRequirements(parsedReqs);
+      setSelectedRequirement(parsedReqs[0] || null);
+      setProposalDrafts([]);
+      setActiveDraftIdx(0);
+      setEditedDraftValue("");
+      setActiveTab("requirements");
+
+      const matchData = await fetchJson("/api/rfp/match", {
+        method: "POST",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ workspaceId: workspace.id }),
+      });
+
+      const nextMatrix = {};
+      (matchData.matches || []).forEach((match) => {
+        const grade = match.compliance_status === "pass"
+          ? "Strong"
+          : match.compliance_status === "partial"
+          ? "Partial"
+          : "Poor";
+        nextMatrix[match.requirement_id] = {
+          matchGrade: grade,
+          status: match.compliance_status,
+          reasoning: `${match.reasoning} Confidence: ${match.confidence_score}%.`,
+          recommendation: match.compliance_status === "fail"
+            ? "Add partner evidence or create an exception response for this gap."
+            : "Attach this evidence in the proposal appendix.",
+          evidence: match.evidence,
+          evidenceItems: match.evidence_items || [],
+        };
+      });
+      setMatchMatrix(nextMatrix);
+      setRequirements((current) => current.map((req) => {
+        const match = (matchData.matches || []).find((item) => item.requirement_id === req.id);
+        return match ? { ...req, status: match.compliance_status } : req;
+      }));
+
+      const draftData = await fetchJson("/api/rfp/draft", {
+        method: "POST",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ workspaceId: workspace.id }),
+      });
+      const drafts = (draftData.drafts || []).map(mapDraft);
+      setProposalDrafts(drafts);
+      setReviewResult(null);
+      setActiveDraftIdx(0);
+      if (drafts[0]) {
+        setEditedDraftValue(drafts[0].content || "");
+      }
+      setActiveTab("draft");
+
+      const reviewData = await fetchJson("/api/rfp/review", {
+        method: "POST",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ workspaceId: workspace.id }),
+      });
+      const mappedReview = mapReviewResult(reviewData.review || reviewData);
+      setReviewResult(mappedReview);
+      setActiveTab("review");
+
+      const scoreData = await fetchJson("/api/rfp/score", {
+        method: "POST",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ workspaceId: workspace.id, requirements: parsedReqs, rawText: rfpText }),
+      });
+      if (scoreData.record || scoreData.scores) {
+        const scoreRecord = scoreData.record || scoreData.scores;
+        setRatingAnalysis({
+          winScore: scoreRecord.total_score,
+          benchmarks: {
+            budgetAlignment: scoreRecord.budget_alignment,
+            capabilityMatch: scoreRecord.capability_match,
+            complianceScore: scoreRecord.compliance_score,
+            riskBuffer: scoreRecord.evaluation_history_score || 75,
+          },
+          decision: scoreRecord.decision,
+          mandatoryTotal: scoreRecord.mandatory_total || 0,
+          mandatoryPassed: scoreRecord.mandatory_passed || 0,
+          mandatoryPartial: scoreRecord.mandatory_partial || 0,
+          mandatoryFailed: scoreRecord.mandatory_failed || 0,
+          decisionReasoning: scoreRecord.decision_reasoning || scoreData.scores?.decision_reasoning || "",
+          remedialActions: [
+            `Historical sector win rate: ${scoreRecord.sector_win_rate || scoreData.scores?.sector_win_rate || 0}%.`,
+            `Similar experience score: ${scoreRecord.similar_experience_score || scoreData.scores?.similar_experience_score || 0}%.`,
+            `Mandatory compliance: ${scoreRecord.mandatory_passed || 0} passed / ${scoreRecord.mandatory_total || 0} total mandatory requirements.`,
+          ],
+        });
+      }
+
+      setActiveTab("score");
+      setAlert({ type: "success", text: "Full pipeline completed successfully." });
+      setTimeout(() => setAlert(null), 2500);
+    } catch (err) {
+      setAlert({ type: "error", text: `Pipeline failed: ${err.message}` });
+      setActiveTab("upload");
+    } finally {
+      setIsProcessingPipeline(false);
     }
   };
 
@@ -346,6 +545,9 @@ export default function DashboardPage() {
     setIsAnalyzing(true);
     setRfpText(text);
     setAlert(null);
+    setReviewResult(null);
+    setRatingAnalysis(null);
+    setMatchMatrix({});
 
     try {
       let workspace = uploadMeta.workspace?.id
@@ -393,6 +595,10 @@ export default function DashboardPage() {
         setProposalDrafts([]);
         setActiveDraftIdx(0);
         setEditedDraftValue("");
+        setReviewResult(null);
+      } else {
+        setRequirements([]);
+        setSelectedRequirement(null);
       }
       
       setWorkspaces((current) => current.map((item) =>
@@ -447,7 +653,8 @@ export default function DashboardPage() {
             recommendation: match.compliance_status === "fail"
               ? "Add partner evidence or create an exception response for this gap."
               : "Attach this evidence in the proposal appendix.",
-            evidence: match.evidence
+            evidence: match.evidence,
+            evidenceItems: match.evidence_items || [],
           };
         });
         setMatchMatrix(nextMatrix);
@@ -504,6 +711,7 @@ export default function DashboardPage() {
           mandatoryPassed: scoreRecord.mandatory_passed || 0,
           mandatoryPartial: scoreRecord.mandatory_partial || 0,
           mandatoryFailed: scoreRecord.mandatory_failed || 0,
+          decisionReasoning: scoreRecord.decision_reasoning || data.scores?.decision_reasoning || "",
           remedialActions: [
             `Historical sector win rate: ${scoreRecord.sector_win_rate || data.scores?.sector_win_rate || 0}%.`,
             `Similar experience score: ${scoreRecord.similar_experience_score || data.scores?.similar_experience_score || 0}%.`,
@@ -642,6 +850,31 @@ export default function DashboardPage() {
                 isProcessing={isAnalyzing}
                 initialText={rfpText}
               />
+              <div className="bg-[#1a1a2e] border border-purple-950/40 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4 shadow-xl">
+                <div>
+                  <h3 className="text-sm font-bold text-white">One-click pipeline</h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Run analysis, retrieval, drafting, review, and win scoring in one pass.
+                  </p>
+                </div>
+                <button
+                  onClick={handleRunFullPipeline}
+                  disabled={isProcessingPipeline || !rfpText.trim()}
+                  className="px-5 py-3 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white font-semibold text-sm transition flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {isProcessingPipeline ? (
+                    <>
+                      <Loader className="h-4 w-4 animate-spin" />
+                      <span>Processing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4" />
+                      <span>Process Full Pipeline</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           )}
 
@@ -759,8 +992,17 @@ export default function DashboardPage() {
                           </span>
                         </div>
                         <p className="text-xs text-slate-400 leading-relaxed">{req.description}</p>
-                        <div className="text-[11px] bg-[#1a1a2e]/40 p-2 rounded-lg border border-purple-950/10 text-purple-300 font-mono mt-1.5">
+                        <div className="text-[11px] bg-[#1a1a2e]/40 p-2 rounded-lg border border-purple-950/10 text-purple-300 font-mono mt-1.5 space-y-1">
                           <strong>Evidence Proof:</strong> {match.evidence || "No immediate project evidence match."}
+                          {Array.isArray(match.evidenceItems) && match.evidenceItems.length > 0 && (
+                            <div className="space-y-1 pt-1">
+                              {match.evidenceItems.slice(0, 2).map((item) => (
+                                <div key={item.source_reference} className="text-slate-300">
+                                  {item.source_reference} · {item.project_name} · {item.match_score}%
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -802,7 +1044,16 @@ export default function DashboardPage() {
             />
           )}
 
-          {/* TAB 5: Win Score Diagnostic Dashboard */}
+          {/* TAB 5: Reviewer */}
+          {activeTab === "review" && (
+            <ReviewerPanel
+              onRunReview={handleReviewProposal}
+              isReviewing={isReviewing}
+              reviewResult={reviewResult}
+            />
+          )}
+
+          {/* TAB 6: Win Score Diagnostic Dashboard */}
           {activeTab === "score" && (
             <WinScoreDashboard
               activeBidTitle="RFP Bid Response Pipeline"

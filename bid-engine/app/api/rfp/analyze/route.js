@@ -37,6 +37,18 @@ const buildRequirementRows = (extractedData, workspaceId, taxonomyMappings) => {
   (extractedData.mandatory_requirements || []).forEach((item) =>
     add(item, "mandatory", "Mandatory Core")
   );
+  (extractedData.eligibility_criteria || []).forEach((item) =>
+    add(item, "mandatory", "Eligibility Criteria")
+  );
+  (extractedData.required_documents || []).forEach((item) =>
+    add(item, "mandatory", "Required Document")
+  );
+  (extractedData.technical_requirements || []).forEach((item) =>
+    add(item, "technical", "Technical Requirement")
+  );
+  (extractedData.financial_requirements || []).forEach((item) =>
+    add(item, "financial", "Financial Requirement")
+  );
   (extractedData.compliance_clauses || []).forEach((item) =>
     add(item, "mandatory", "Compliance Clause")
   );
@@ -55,6 +67,9 @@ const buildRequirementRows = (extractedData, workspaceId, taxonomyMappings) => {
   // questions_to_answer (new field from improved prompt)
   (extractedData.questions_to_answer || []).forEach((item) =>
     add(item, "evaluation", "Question to Answer")
+  );
+  (extractedData.question_answer_sections || []).forEach((item) =>
+    add(item, "evaluation", "Question / Answer Section")
   );
 
   // deadlines — new array format from improved prompt
@@ -135,22 +150,43 @@ CRITICAL RULES:
 
 Extract and return JSON:
 {
-  "mandatory_requirements": [
-    "Vendor must be registered with SECP",
-    "Minimum 5 years software development experience required",
-    "ISO 9001 certification is mandatory"
-  ],
-  "evaluation_criteria": [
-    "Technical Approach - 30% weight",
-    "Past Experience and References - 25% weight"
-  ],
-  "questions_to_answer": [
-    "Describe your technical approach for enterprise systems",
-    "Provide details of 3 similar government projects"
-  ],
-  "deadlines": ["Submission deadline: December 31, 2026"],
-  "budget": ["Budget range: PKR 50M to 80M"],
-  "compliance_clauses": [
+    "mandatory_requirements": [
+      "Vendor must be registered with SECP",
+      "Minimum 5 years software development experience required",
+      "ISO 9001 certification is mandatory"
+    ],
+    "eligibility_criteria": [
+      "Bidders must have experience in public sector procurement",
+      "Local presence is required in the country of execution"
+    ],
+    "required_documents": [
+      "Company profile",
+      "Tax registration certificate",
+      "Audited financial statements"
+    ],
+    "technical_requirements": [
+      "Provide a secure cloud-hosted solution",
+      "Support multi-user access and audit logs"
+    ],
+    "financial_requirements": [
+      "Submit pricing in local currency",
+      "Include taxes, support, and maintenance in the quote"
+    ],
+    "evaluation_criteria": [
+      "Technical Approach - 30% weight",
+      "Past Experience and References - 25% weight"
+    ],
+    "questions_to_answer": [
+      "Describe your technical approach for enterprise systems",
+      "Provide details of 3 similar government projects"
+    ],
+    "question_answer_sections": [
+      "Question 1: Describe your approach to implementation - Answer: ...",
+      "Question 2: Provide your closest reference projects - Answer: ..."
+    ],
+    "deadlines": ["Submission deadline: December 31, 2026"],
+    "budget": ["Budget range: PKR 50M to 80M"],
+    "compliance_clauses": [
     "Must comply with Pakistan Data Protection Act 2023",
     "Data must be stored on servers in Pakistan"
   ]
@@ -163,6 +199,14 @@ RFP TEXT:
 ${rawText.substring(0, 6000)}`;
 
     const extractedData = await analyzeWithGroq(extractionPrompt, systemPrompt);
+    if (!extractedData || extractedData.error) {
+      throw new Error(extractedData?.message || "Groq extraction failed.");
+    }
+    extractedData.eligibility_criteria = extractedData.eligibility_criteria || [];
+    extractedData.required_documents = extractedData.required_documents || [];
+    extractedData.technical_requirements = extractedData.technical_requirements || [];
+    extractedData.financial_requirements = extractedData.financial_requirements || [];
+    extractedData.question_answer_sections = extractedData.question_answer_sections || [];
 
     // ── Step 3: Taxonomy mapping ──────────────────────────────────────────────
     const { data: dbTaxonomy, error: taxonomyError } = await supabase

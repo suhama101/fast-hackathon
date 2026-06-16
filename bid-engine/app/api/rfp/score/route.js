@@ -99,7 +99,10 @@ export async function POST(request) {
         .single();
 
       if (dbError) throw dbError;
-      record = savedScore;
+      record = {
+        ...savedScore,
+        decision_reasoning: scores.decision_reasoning,
+      };
     }
 
     return NextResponse.json({
@@ -120,6 +123,7 @@ export async function POST(request) {
         strategic_fit_score: scores.strategic_fit_score,
         risk_penalty_score: scores.risk_penalty_score,
         decision: scores.decision,
+        decision_reasoning: scores.decision_reasoning,
         mandatory_total: scores.mandatory_total,
         mandatory_passed: scores.mandatory_passed,
         mandatory_partial: scores.mandatory_partial,

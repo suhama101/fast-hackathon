@@ -232,6 +232,9 @@ export function calculateWinScore({ requirements = [], capabilities = [], bidHis
   // GO/NO-GO is driven by compliance score (pass_count / total_mandatory):
   // If compliance_score >= 70 → GO, otherwise → NO-GO
   const decision = complianceScore >= 70 ? "GO" : "NO-GO";
+  const decisionReasoning = decision === "GO"
+    ? `Compliance is at ${complianceScore}% and the evidence profile clears the submission threshold.`
+    : `Compliance is at ${complianceScore}% which is below the 70% GO threshold.`;
 
   return {
     sector,
@@ -247,6 +250,7 @@ export function calculateWinScore({ requirements = [], capabilities = [], bidHis
     strategic_fit_score: strategicFit,
     risk_penalty_score: Math.min(100, riskPenalty),
     decision,
+    decision_reasoning: decisionReasoning,
     // Expose raw counts for transparency in the UI
     mandatory_total: mandatoryTotal,
     mandatory_passed: mandatoryPassed,

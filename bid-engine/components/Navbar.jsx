@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { FileText, Award, ShieldAlert, LogOut, CheckCircle, Menu, X, Cpu } from "lucide-react";
+import { FileText, Award, ShieldAlert, LogOut, CheckCircle, Menu, X, Cpu, ClipboardCheck } from "lucide-react";
 
 export default function Navbar({ activeTab, setActiveTab, userEmail, onSignOut }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -11,7 +11,8 @@ export default function Navbar({ activeTab, setActiveTab, userEmail, onSignOut }
     { id: "requirements", step: "2", label: "Requirements",      icon: CheckCircle },
     { id: "compliance",   step: "3", label: "Compliance Check",  icon: ShieldAlert },
     { id: "draft",        step: "4", label: "AI Draft",          icon: Cpu       },
-    { id: "score",        step: "5", label: "Win Score",         icon: Award     },
+    { id: "review",       step: "5", label: "Reviewer",          icon: ClipboardCheck },
+    { id: "score",        step: "6", label: "Win Score",         icon: Award     },
   ];
 
   return (

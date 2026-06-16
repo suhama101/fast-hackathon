@@ -69,14 +69,7 @@ export async function POST(request) {
       throw new Error(`Failed to load workspace requirement parameters: ${reqError?.message}`);
     }
 
-    // Identify target items. If we have Question Sections specifically, prioritize them. 
-    // Otherwise, select the top mandatory/evaluation items as sections to draft responses for.
-    let targets = requirements.filter(r => r.extracted_value === "Question Section");
-    if (targets.length === 0) {
-      targets = requirements.slice(0, 4); // Fallback: respond to the top 4 extracted requirements
-    }
-
-    if (targets.length === 0) {
+    if (requirements.length === 0) {
       return NextResponse.json({
         success: true,
         message: "No sections or requirements found to draft. Analyze the RFP first.",
@@ -113,24 +106,49 @@ export async function POST(request) {
       throw new Error(`Failed to read capabilities library: ${capError.message}`);
     }
 
+    const evidenceByRequirement = requirements.map((item) => ({
+      requirement_id: item.id,
+      requirement_text: item.requirement_text,
+      compliance_status: item.compliance_status,
+      matched_evidence: item.matched_evidence,
+      match_confidence: item.match_confidence,
+      evidence_items: item.evidence_items || [],
+      match_reasoning: item.match_reasoning,
+    }));
+
+    const draftTargets = [
+      { id: "executive-summary", section_title: "Executive Summary" },
+      { id: "understanding-requirements", section_title: "Understanding of Requirements" },
+      { id: "technical-approach", section_title: "Technical Approach" },
+      { id: "relevant-experience", section_title: "Relevant Experience" },
+      { id: "compliance-response", section_title: "Compliance Response" },
+      { id: "implementation-approach", section_title: "Implementation Approach" },
+      { id: "conclusion", section_title: "Conclusion" },
+    ];
+
+    if (requirementId && requirements.find((req) => req.id === requirementId)) {
+      const focused = requirements.find((req) => req.id === requirementId);
+      draftTargets.unshift({
+        id: focused.id,
+        section_title: `Response to ${String(focused.requirement_text || "").slice(0, 50)}`,
+      });
+    }
+
     // 3. Draft the proposal template using Groq
     const toneInstruction = tone ? `Use a "${tone}" tone throughout.` : "Use a professional, compliant tone.";
     const capabilityContext = capabilityInfo ? `\n\nADDITIONAL CAPABILITY CONTEXT FROM USER:\n${capabilityInfo}` : "";
     const systemPrompt = `You are an expert proposal writer. Write professional, compliant proposal responses. ${toneInstruction}`;
 
-    const userPrompt = `Generate a completed proposal document responding to the retrieved RFP questions/requirements.
+    const userPrompt = `Generate a structured proposal document responding to the retrieved RFP requirements.
 
-SECTIONS TO COMPLY WITH:
-${JSON.stringify(targets.map(t => ({
-  id: t.id,
-  text: t.requirement_text,
-  matched_evidence: t.matched_evidence,
-  confidence: t.match_confidence,
-  compliance_status: t.compliance_status,
-})))}
+OUTPUT SECTIONS:
+${JSON.stringify(draftTargets)}
 
 EXTRACTED ENTITIES AND TAXONOMY CONTEXT:
 ${JSON.stringify(extractedEntities)}
+
+MATCHED EVIDENCE BY REQUIREMENT:
+${JSON.stringify(evidenceByRequirement)}
 
 OUR CAPABILITY LIBRARY EXCERPTS:
 ${JSON.stringify(capabilities.slice(0, 10).map(c => ({
@@ -143,11 +161,12 @@ ${JSON.stringify(capabilities.slice(0, 10).map(c => ({
   client_type: c.client_type
 })))}${capabilityContext}
 
-For each section/requirement item:
-- Find the most matching capabilities from our library lists.
-- Write a professional, comprehensive, and fully compliant proposal response paragraph.
-- Reference specific past projects, skills, or certifications as concrete evidence of compliance.
-- Keep a formal, premium, persuasive proposal writer tone.
+For each section:
+- Use only matched evidence and extracted requirements.
+- Write a concise but complete proposal section.
+- Avoid unsupported claims.
+- Explicitly mention compliance status where relevant.
+- Keep a formal, procurement-safe tone.
 
 Return a JSON object containing a "drafts" array. Format of each element:
 - "section_title": exact concise heading for the response section (e.g., "Response to Security SLA")
@@ -157,7 +176,17 @@ Return a JSON object containing a "drafts" array. Format of each element:
 Return ONLY valid JSON.`;
 
     const aiResponse = await analyzeWithGroq(userPrompt, systemPrompt);
-    const draftsList = aiResponse.drafts || [];
+    const draftsList = Array.isArray(aiResponse.drafts) && aiResponse.drafts.length
+      ? aiResponse.drafts
+      : draftTargets.map((section, index) => {
+          const reference = evidenceByRequirement[index % evidenceByRequirement.length] || {};
+          const evidenceLine = reference.matched_evidence || reference.evidence_items?.[0]?.summary || reference.requirement_text || "No evidence available.";
+          return {
+            section_title: section.section_title,
+            requirement_id: reference.requirement_id || section.id,
+            content: `## ${section.section_title}\n\nThis section is generated from the extracted requirements and matched evidence library.\n\nEvidence reference: ${evidenceLine}\n\nReview and refine the language before submission.`,
+          };
+        });
 
     // 4. Pre-clear any old drafts for this workspace to avoid duplication in multiple runs
     await supabase
