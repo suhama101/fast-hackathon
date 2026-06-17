@@ -10,6 +10,37 @@ export async function GET(request) {
     if (auth.errorResponse) return auth.errorResponse;
 
     const { supabase, user } = auth;
+    const { searchParams } = new URL(request.url);
+    const workspaceId = searchParams.get("workspaceId");
+
+    if (workspaceId && isUuid(workspaceId)) {
+      const ownership = await requireWorkspaceOwner(request, workspaceId);
+      if (ownership.errorResponse) return ownership.errorResponse;
+
+      const [
+        { data: workspace, error: wsError },
+        { data: requirements, error: reqError },
+        { data: drafts, error: draftsError },
+        { data: winScore, error: scoreError }
+      ] = await Promise.all([
+        supabase.from("rfp_workspaces").select("*").eq("id", workspaceId).eq("user_id", user.id).maybeSingle(),
+        supabase.from("rfp_requirements").select("*").eq("workspace_id", workspaceId).order("id", { ascending: true }),
+        supabase.from("proposal_drafts").select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: true }),
+        supabase.from("win_scores").select("*").eq("workspace_id", workspaceId).maybeSingle()
+      ]);
+
+      if (wsError) throw wsError;
+
+      return NextResponse.json({
+        success: true,
+        mode: "dataset",
+        workspace,
+        requirements: requirements || [],
+        drafts: drafts || [],
+        winScore: winScore || null
+      });
+    }
+
     const { data, error } = await supabase
       .from("rfp_workspaces")
       .select("*")
