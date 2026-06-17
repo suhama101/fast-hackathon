@@ -74,14 +74,14 @@ export default function Navbar({
                     onClick={() => handleStepClick(step, index)}
                     disabled={isLocked}
                     title={isLocked ? `Complete previous steps to unlock ${step.label}` : step.label}
-                    className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all select-none ${
+                    className={`relative flex items-center gap-1.5 px-2 py-1 lg:px-2.5 lg:py-1 rounded-lg text-[10px] md:text-[11px] lg:text-xs font-semibold border transition-all select-none ${
                       isActive
-                        ? "bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-900/40"
+                        ? "bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-950/50 hover:bg-indigo-500 hover:border-indigo-400"
                         : isComplete
-                        ? "bg-emerald-950/40 border-emerald-800/60 text-emerald-300 hover:border-emerald-500 cursor-pointer"
+                        ? "bg-emerald-950/25 hover:bg-emerald-900/35 border-emerald-800 text-emerald-300 hover:text-white hover:border-emerald-500 cursor-pointer shadow-sm shadow-emerald-950/20"
                         : isLocked
-                        ? "bg-slate-900/40 border-slate-800 text-slate-600 cursor-not-allowed"
-                        : "bg-slate-900/60 border-slate-700 text-slate-400 hover:border-indigo-600 hover:text-slate-200 cursor-pointer"
+                        ? "bg-slate-950/40 border-slate-900/80 text-slate-600 cursor-not-allowed opacity-40"
+                        : "bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-300 hover:border-indigo-600 hover:text-slate-100 cursor-pointer"
                     }`}
                   >
                     <span className={`w-4 h-4 flex items-center justify-center rounded-full text-[10px] font-bold flex-shrink-0 ${
@@ -101,7 +101,7 @@ export default function Navbar({
                         index + 1
                       )}
                     </span>
-                    <span className="hidden lg:inline whitespace-nowrap">{step.label}</span>
+                    <span className="inline whitespace-nowrap">{step.label}</span>
                   </button>
                 </React.Fragment>
               );
@@ -167,14 +167,14 @@ export default function Navbar({
                   <button
                     onClick={() => handleStepClick(step, index)}
                     disabled={isLocked}
-                    className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border whitespace-nowrap transition ${
+                    className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-semibold border whitespace-nowrap transition-all ${
                       isActive
-                        ? "bg-indigo-600 border-indigo-500 text-white"
+                        ? "bg-indigo-600 border-indigo-500 text-white shadow-sm"
                         : isComplete
-                        ? "bg-emerald-950/40 border-emerald-800/60 text-emerald-300"
+                        ? "bg-emerald-950/20 border-emerald-800/80 text-emerald-300 hover:text-white cursor-pointer"
                         : isLocked
-                        ? "bg-slate-900/40 border-slate-800 text-slate-600 cursor-not-allowed"
-                        : "bg-slate-900/60 border-slate-700 text-slate-400"
+                        ? "bg-slate-950/40 border-slate-900 text-slate-600 cursor-not-allowed opacity-40"
+                        : "bg-slate-900 border-slate-700 text-slate-350 hover:text-slate-100 hover:border-indigo-500 cursor-pointer"
                     }`}
                   >
                     {isComplete ? (

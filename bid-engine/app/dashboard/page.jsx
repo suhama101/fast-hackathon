@@ -902,16 +902,16 @@ export default function DashboardPage() {
   const compliancePassCount = requirements.filter(req => req.status === "pass").length;
   const complianceScorePercent = Math.round((compliancePassCount / requirements.length) * 100) || 75;
   const workflowSteps = [
-    { id: "upload", label: "Upload", complete: Boolean(rfpText.trim()) },
+    { id: "upload", label: "Upload RFP", complete: Boolean(rfpText.trim()) },
     { id: "requirements", label: "Requirements", complete: requirements.length > 0 },
-    { id: "compliance", label: "Compliance", complete: Object.keys(matchMatrix).filter((key) => key !== "__debug").length > 0 },
-    { id: "draft", label: "Draft", complete: proposalDrafts.length > 0 },
+    { id: "compliance", label: "Compliance Check", complete: Object.keys(matchMatrix).filter((key) => key !== "__debug").length > 0 },
+    { id: "draft", label: "AI Draft", complete: proposalDrafts.length > 0 },
     { id: "review", label: "Reviewer", complete: Boolean(reviewResult) },
-    { id: "score", label: "Score", complete: Boolean(ratingAnalysis) },
+    { id: "score", label: "Win Score", complete: Boolean(ratingAnalysis) },
   ];
   const activeStepIndex = workflowSteps.findIndex((step) => step.id === activeTab);
   const isWorkflowTab = activeStepIndex >= 0;
-  const canAccessStep = (index) => index === 0 || workflowSteps[index - 1]?.complete || workflowSteps[index]?.complete;
+  const canAccessStep = (index) => index === 0 || index === activeStepIndex || workflowSteps[index - 1]?.complete || workflowSteps[index]?.complete;
   const goToWorkflowStep = (stepId) => {
     const index = workflowSteps.findIndex((step) => step.id === stepId);
     if (index >= 0 && canAccessStep(index)) {
