@@ -1,79 +1,79 @@
 "use client";
 
 import React, { useState } from "react";
-import { FileText, Award, ShieldAlert, LogOut, CheckCircle, Menu, X, Cpu, ClipboardCheck } from "lucide-react";
+import { LogOut, Menu, X, Cpu, Home, Settings } from "lucide-react";
 
 export default function Navbar({ activeTab, setActiveTab, userEmail, onSignOut }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const menuItems = [
-    { id: "upload",       step: "1", label: "Upload RFP",        icon: FileText  },
-    { id: "requirements", step: "2", label: "Requirements",      icon: CheckCircle },
-    { id: "compliance",   step: "3", label: "Compliance Check",  icon: ShieldAlert },
-    { id: "draft",        step: "4", label: "AI Draft",          icon: Cpu       },
-    { id: "review",       step: "5", label: "Reviewer",          icon: ClipboardCheck },
-    { id: "score",        step: "6", label: "Win Score",         icon: Award     },
+    { id: "upload", label: "Home", icon: Home },
+    { id: "requirements", label: "Current RFP", icon: Cpu },
+    { id: "settings", label: "Settings", icon: Settings },
   ];
 
   return (
     <nav className="w-full bg-[#0d0d16] border-b border-slate-800/80 sticky top-0 z-50 shadow-lg" id="bid-engine-nav">
-      {/* Main nav bar row */}
       <div className="px-6 lg:px-8 h-16 flex items-center justify-between max-w-7xl mx-auto w-full">
-        <div className="flex items-center space-x-8">
-          <div className="flex-shrink-0 flex items-center space-x-2 text-indigo-400">
+        <button
+          onClick={() => setActiveTab && setActiveTab("upload")}
+          className="flex-shrink-0 flex items-center space-x-2 text-indigo-400 hover:text-indigo-300 transition"
+        >
             <Cpu className="h-8 w-8 animate-pulse text-indigo-500" />
             <span className="font-sans font-extrabold text-xl tracking-tight text-white">
               BidEngine<span className="text-indigo-500">.AI</span>
             </span>
-          </div>
+        </button>
 
-          {/* Desktop Navigation Links */}
-          <div className="hidden lg:flex items-center space-x-2">
-            {menuItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setActiveTab && setActiveTab(item.id)}
-                  className={`flex flex-col items-center px-3 py-2 rounded-md text-xs font-medium transition-all duration-200 outline-none cursor-pointer min-w-[90px] ${
-                    isActive
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20"
-                      : "text-slate-400 hover:text-white hover:bg-slate-800"
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <Icon className="h-3.5 w-3.5" />
-                    <span className="font-bold">{item.label}</span>
-                  </div>
-                  <span className={`text-[9px] font-mono mt-0.5 ${isActive ? "text-indigo-200" : "text-slate-600"}`}>
-                    STEP {item.step}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* User Section / Access controls */}
         <div className="hidden lg:flex items-center space-x-4">
           {userEmail && (
             <div className="text-slate-400 text-xs font-mono">
               Active Bidding: <span className="text-indigo-400">{userEmail}</span>
             </div>
           )}
-          {onSignOut && (
+          <div className="relative">
             <button
-              onClick={onSignOut}
-              className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-850 hover:bg-red-955 hover:text-red-300 rounded text-xs text-slate-400 border border-slate-855 transition cursor-pointer"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-800"
             >
-              <LogOut className="h-3.5 w-3.5" />
-              <span>Exit Workspace</span>
+              {mobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+              Menu
             </button>
-          )}
+            {mobileMenuOpen && (
+              <div className="absolute right-0 mt-2 w-52 rounded-xl border border-slate-800 bg-slate-950 p-2 shadow-2xl">
+                {menuItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        setActiveTab && setActiveTab(item.id);
+                        setMobileMenuOpen(false);
+                      }}
+                      className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm transition ${
+                        isActive ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {item.label}
+                    </button>
+                  );
+                })}
+                {onSignOut && (
+                  <button
+                    onClick={onSignOut}
+                    className="mt-1 flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-red-400 hover:bg-red-950/30"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Exit Workspace
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Mobile menu button */}
         <div className="lg:hidden flex items-center">
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -104,7 +104,7 @@ export default function Navbar({ activeTab, setActiveTab, userEmail, onSignOut }
                 }`}
               >
                 <Icon className="h-5 w-5" />
-                <span>Step {item.step}: {item.label}</span>
+                <span>{item.label}</span>
               </button>
             );
           })}

@@ -325,8 +325,16 @@ export default async function handler(req, res) {
       compliance_status: "partial",
       extracted_value: String(requirement.source_text || requirement.requirement).slice(0, 600),
     }));
+    const extractionQualityScore = validation.diagnostics.requirements_before_validation
+      ? Number((finalRequirements.length / validation.diagnostics.requirements_before_validation).toFixed(2))
+      : 0;
 
     // Step 5: Save to Supabase
+    await workspaceDb
+      .from("rfp_requirements")
+      .delete()
+      .eq("workspace_id", workspaceId);
+
     let insertedRequirements = [];
     if (finalRows.length > 0) {
       const { data: inserted, error: insertError } = await workspaceDb
@@ -352,8 +360,12 @@ export default async function handler(req, res) {
           sections_detected: new Set(finalRequirements.map((item) => item.source_section).filter(Boolean)).size,
           requirements_before_validation: validation.diagnostics.requirements_before_validation,
           requirements_after_validation: finalRequirements.length,
+          rejected_chunks: validation.diagnostics.rejected_examples,
           rejected_bad_chunks: validation.diagnostics.rejected_bad_chunks,
           rejected_examples: validation.diagnostics.rejected_examples,
+          extraction_quality_score: extractionQualityScore,
+          example_good_requirement: finalRequirements[0]?.requirement || null,
+          example_rejected_chunk: validation.diagnostics.rejected_examples?.[0] || null,
         },
       },
       count: insertedRequirements.length,

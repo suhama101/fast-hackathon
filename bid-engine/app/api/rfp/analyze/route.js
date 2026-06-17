@@ -180,6 +180,14 @@ ${rawText}`;
 
     const finalRequirements = mergedRequirements.slice(0, 80);
     const rawRows = buildRequirementRows(finalRequirements, workspaceId);
+    const extractionQualityScore = preValidationRequirements.length
+      ? Number((finalRequirements.length / preValidationRequirements.length).toFixed(2))
+      : 0;
+
+    await supabase
+      .from("rfp_requirements")
+      .delete()
+      .eq("workspace_id", workspaceId);
 
     if (rawRows.length === 0) {
       return NextResponse.json({
@@ -187,7 +195,18 @@ ${rawText}`;
         workspaceId,
         extracted: extractedData,
         requirements: [],
-        diagnostics: { total_requirements: 0, category_counts: {} },
+        diagnostics: {
+          total_requirements: 0,
+          category_counts: {},
+          extraction_debug: {
+            raw_text_length: rawText.length,
+            requirements_before_validation: validation.diagnostics.requirements_before_validation,
+            requirements_after_validation: 0,
+            rejected_chunks: validation.diagnostics.rejected_examples,
+            rejected_bad_chunks: validation.diagnostics.rejected_bad_chunks,
+            extraction_quality_score: 0,
+          },
+        },
         count: 0,
       });
     }
@@ -214,8 +233,12 @@ ${rawText}`;
         sections_detected: new Set(finalRequirements.map((item) => item.source_section).filter(Boolean)).size,
         requirements_before_validation: validation.diagnostics.requirements_before_validation,
         requirements_after_validation: finalRequirements.length,
+        rejected_chunks: validation.diagnostics.rejected_examples,
         rejected_bad_chunks: validation.diagnostics.rejected_bad_chunks,
         rejected_examples: validation.diagnostics.rejected_examples,
+        extraction_quality_score: extractionQualityScore,
+        example_good_requirement: finalRequirements[0]?.requirement || null,
+        example_rejected_chunk: validation.diagnostics.rejected_examples?.[0] || null,
       },
     };
 
