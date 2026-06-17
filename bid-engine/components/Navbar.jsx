@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { LogOut, Menu, X, Cpu, Check, Lock } from "lucide-react";
+import { LogOut, Menu, X, Cpu, Check, Lock, Home, History, Settings } from "lucide-react";
 
 /**
  * Navbar with embedded workflow progress tracker.
@@ -133,13 +133,34 @@ export default function Navbar({
                     {userEmail}
                   </div>
                 )}
+                <button
+                  onClick={() => { setMenuOpen(false); setActiveTab && setActiveTab("upload"); }}
+                  className="flex items-center gap-2 w-full px-3 py-2.5 rounded-lg text-sm text-slate-300 hover:bg-slate-800 transition"
+                >
+                  <Home className="h-4 w-4" />
+                  Home
+                </button>
+                <button
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center gap-2 w-full px-3 py-2.5 rounded-lg text-sm text-slate-300 hover:bg-slate-800 transition"
+                >
+                  <History className="h-4 w-4" />
+                  History
+                </button>
+                <button
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center gap-2 w-full px-3 py-2.5 rounded-lg text-sm text-slate-300 hover:bg-slate-800 transition"
+                >
+                  <Settings className="h-4 w-4" />
+                  Settings
+                </button>
                 {onSignOut && (
                   <button
                     onClick={() => { setMenuOpen(false); onSignOut(); }}
                     className="flex items-center gap-2 w-full px-3 py-2.5 rounded-lg text-sm text-red-400 hover:bg-red-950/30 transition"
                   >
                     <LogOut className="h-4 w-4" />
-                    Sign Out
+                    Logout
                   </button>
                 )}
               </div>

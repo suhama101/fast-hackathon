@@ -14,6 +14,14 @@ export default function WinScoreDashboard({
   const analysis = ratingAnalysis;
   const winScore = Number(analysis?.winScore || 0);
   const decision = analysis?.decision || (winScore > 70 ? "GO" : "NO-GO");
+  const scoreButtonLabel = analysis ? "Recalculate Win Score" : "Calculate Win Score";
+  const evidenceCoverage = analysis?.benchmarks?.evidenceCoverage
+    ?? analysis?.score_components?.evidence_coverage
+    ?? analysis?.benchmarks?.capabilityMatch
+    ?? 0;
+  const capabilityMatch = analysis?.benchmarks?.capabilityMatch ?? 0;
+  const complianceScore = analysis?.benchmarks?.complianceScore ?? 0;
+  const riskScore = analysis?.benchmarks?.riskBuffer ?? 0;
 
   return (
     <div className="bg-[#1a1a2e] p-6 rounded-xl border border-purple-950/40 shadow-xl space-y-6" id="win-score-panel">
@@ -41,7 +49,7 @@ export default function WinScoreDashboard({
           ) : (
             <>
               <RefreshCw className="h-3 w-3" />
-              <span>Recalculate Win Score</span>
+              <span>{scoreButtonLabel}</span>
             </>
           )}
         </button>
@@ -56,10 +64,18 @@ export default function WinScoreDashboard({
       ) : !analysis ? (
         <div className="text-center py-20 bg-[#0a0a0f] rounded-xl border border-purple-950/10">
           <ShieldAlert className="h-10 w-10 text-slate-600 mx-auto mb-2" />
-          <p className="text-slate-400 text-sm">No saved win score for this workspace yet.</p>
+          <p className="text-slate-400 text-sm">Win Score has not been calculated yet</p>
           <p className="text-slate-500 text-xs mt-1">
-            Click Recalculate Win Score to call the backend scoring API and save the GO/NO-GO result.
+            Click Calculate Win Score to call the backend scoring API and save the GO / NO-GO result.
           </p>
+          <button
+            onClick={onPredictScore}
+            disabled={isPredicting}
+            className="mt-5 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white font-semibold text-sm transition"
+          >
+            {isPredicting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            <span>Calculate Win Score</span>
+          </button>
         </div>
       ) : (
         <div className="space-y-6">
@@ -155,10 +171,10 @@ export default function WinScoreDashboard({
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
                 {[
-                  { label: "Budget Alignment Score", val: analysis.benchmarks?.budgetAlignment || 85, color: "bg-purple-500", desc: "SOW pricing threshold fit" },
-                  { label: "Capability Match Coverage", val: analysis.benchmarks?.capabilityMatch || 75, color: "bg-blue-500", desc: "Evidence coverage depth" },
-                  { label: "Compliance & SLA Support", val: analysis.benchmarks?.complianceScore || 90, color: "bg-emerald-500", desc: "Mandatory clauses satisfied" },
-                  { label: "Overall Risk Buffer Score", val: analysis.benchmarks?.riskBuffer || 65, color: "bg-rose-500", desc: "Mitigated delivery risk factor" }
+                  { label: "Compliance Score", val: complianceScore, color: "bg-emerald-500", desc: "Mandatory clauses satisfied" },
+                  { label: "Evidence Coverage", val: evidenceCoverage, color: "bg-blue-500", desc: "Requirements backed by evidence" },
+                  { label: "Capability Match", val: capabilityMatch, color: "bg-purple-500", desc: "Capability fit against RFP needs" },
+                  { label: "Risk Score", val: riskScore, color: "bg-rose-500", desc: "Delivery and compliance risk buffer" }
                 ].map((item, idx) => (
                   <div key={idx} className="bg-[#1a1a2e]/40 p-3 rounded-lg border border-purple-950/10 space-y-2">
                     <div className="flex justify-between items-center text-xs">
@@ -207,11 +223,26 @@ export default function WinScoreDashboard({
               )}
 
               <div className="space-y-2 pt-2">
-                <span className="font-bold tracking-tight text-slate-300 block">Required Bidding Actions:</span>
+                <span className="font-bold tracking-tight text-slate-300 block">Recommendations:</span>
                 <ul className="list-disc list-inside space-y-1 text-slate-400 pl-1 leading-relaxed">
                   {analysis.remedialActions?.map((action, key) => (
                     <li key={key}>{action}</li>
                   ))}
+                </ul>
+              </div>
+
+              <div className="space-y-2 pt-2">
+                <span className="font-bold tracking-tight text-slate-300 block">Missing evidence / blockers:</span>
+                <ul className="list-disc list-inside space-y-1 text-slate-400 pl-1 leading-relaxed">
+                  {(analysis.no_matches || 0) > 0 && (
+                    <li>{analysis.no_matches} requirement(s) currently have no evidence match.</li>
+                  )}
+                  {(analysis.mandatoryFailed || 0) > 0 && (
+                    <li>{analysis.mandatoryFailed} mandatory requirement(s) failed compliance.</li>
+                  )}
+                  {(analysis.no_matches || 0) === 0 && (analysis.mandatoryFailed || 0) === 0 && (
+                    <li>No missing evidence blockers are currently flagged by the scoring model.</li>
+                  )}
                 </ul>
               </div>
 

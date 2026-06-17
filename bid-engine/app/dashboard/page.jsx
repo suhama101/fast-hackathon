@@ -438,7 +438,7 @@ export default function DashboardPage() {
       }, {});
       const analysisDebug = {
         fileName: workspace.title,
-        rawTextLength: text.length,
+        rawTextLength: rfpText.length,
         sectionCount: Object.keys(sectionCounts).length,
         requirementsBySection: sectionCounts,
         finalRequirementCount: parsedReqs.length,
@@ -498,15 +498,6 @@ export default function DashboardPage() {
         __debug: {
           ...analysisDebug,
           ragSamples,
-          scoreComponents: scoreData?.record?.score_components || scoreData?.scores?.score_components || {},
-          scoreSummary: {
-            totalScore: scoreData?.record?.total_score || scoreData?.scores?.total_score || 0,
-            decision: scoreData?.record?.decision || scoreData?.scores?.decision || "NO-GO",
-            decisionReasoning: scoreData?.record?.decision_reasoning || scoreData?.scores?.decision_reasoning || "",
-            strongMatches: scoreData?.record?.strong_matches || scoreData?.scores?.strong_matches || 0,
-            partialMatches: scoreData?.record?.partial_matches || scoreData?.scores?.partial_matches || 0,
-            noMatches: scoreData?.record?.no_matches || scoreData?.scores?.no_matches || 0,
-          },
         },
       });
       setRuntimeDebug({
@@ -845,13 +836,15 @@ export default function DashboardPage() {
 
       if (data.record || data.scores) {
         const scoreRecord = data.record || data.scores;
+        const scoreComponents = scoreRecord.score_components || data.scores?.score_components || {};
         setRatingAnalysis({
           winScore: scoreRecord.total_score,
           benchmarks: {
             budgetAlignment: scoreRecord.budget_alignment,
             capabilityMatch: scoreRecord.capability_match,
             complianceScore: scoreRecord.compliance_score,
-            riskBuffer: scoreRecord.evaluation_history_score || 75
+            riskBuffer: scoreRecord.evaluation_history_score || 75,
+            evidenceCoverage: scoreComponents.evidence_coverage || scoreRecord.capability_match || 0,
           },
           decision: scoreRecord.decision,
           mandatoryTotal: scoreRecord.mandatory_total || 0,
@@ -863,7 +856,11 @@ export default function DashboardPage() {
             `Historical sector win rate: ${scoreRecord.sector_win_rate || data.scores?.sector_win_rate || 0}%.`,
             `Similar experience score: ${scoreRecord.similar_experience_score || data.scores?.similar_experience_score || 0}%.`,
             `Mandatory compliance: ${scoreRecord.mandatory_passed || 0} passed / ${scoreRecord.mandatory_total || 0} total mandatory requirements.`
-          ]
+          ],
+          score_components: scoreComponents,
+          strong_matches: scoreRecord.strong_matches || data.scores?.strong_matches || 0,
+          partial_matches: scoreRecord.partial_matches || data.scores?.partial_matches || 0,
+          no_matches: scoreRecord.no_matches || data.scores?.no_matches || 0,
         });
       }
       setAlert({
@@ -901,17 +898,23 @@ export default function DashboardPage() {
   // Calculate compliance statistics
   const compliancePassCount = requirements.filter(req => req.status === "pass").length;
   const complianceScorePercent = Math.round((compliancePassCount / requirements.length) * 100) || 75;
+  const complianceMatchCount = Object.keys(matchMatrix).filter((key) => key !== "__debug").length;
   const workflowSteps = [
-    { id: "upload", label: "Upload RFP", complete: Boolean(rfpText.trim()) },
+    { id: "upload", label: "Upload RFP", complete: requirements.length > 0 },
     { id: "requirements", label: "Requirements", complete: requirements.length > 0 },
-    { id: "compliance", label: "Compliance Check", complete: Object.keys(matchMatrix).filter((key) => key !== "__debug").length > 0 },
+    { id: "compliance", label: "Compliance Check", complete: complianceMatchCount > 0 },
     { id: "draft", label: "AI Draft", complete: proposalDrafts.length > 0 },
     { id: "review", label: "Reviewer", complete: Boolean(reviewResult) },
     { id: "score", label: "Win Score", complete: Boolean(ratingAnalysis) },
   ];
   const activeStepIndex = workflowSteps.findIndex((step) => step.id === activeTab);
   const isWorkflowTab = activeStepIndex >= 0;
-  const canAccessStep = (index) => index === 0 || index === activeStepIndex || workflowSteps[index - 1]?.complete || workflowSteps[index]?.complete;
+  const canAccessStep = (index) => {
+    if (index <= 0) return true;
+    if (index === activeStepIndex || workflowSteps[index]?.complete) return true;
+    if (workflowSteps[index - 1]?.complete) return true;
+    return index === 5 && Boolean(reviewResult);
+  };
   const goToWorkflowStep = (stepId) => {
     const index = workflowSteps.findIndex((step) => step.id === stepId);
     if (index >= 0 && canAccessStep(index)) {
@@ -958,24 +961,50 @@ export default function DashboardPage() {
       return;
     }
     if (activeTab === "score") {
-      resetWorkflow();
+      if (ratingAnalysis) {
+        resetWorkflow();
+      } else {
+        await executePredictScore();
+      }
     }
   };
-  const primaryActionLabel = {
-    upload: requirements.length > 0 ? "Continue to Requirements" : "Analyze RFP to Continue",
+  const workflowBackLabels = {
+    requirements: "Back to Upload",
+    compliance: "Back to Requirements",
+    draft: "Back to Compliance",
+    review: "Back to AI Draft",
+    score: "Back to Reviewer",
+  };
+  const workflowBackTargets = {
+    requirements: "upload",
+    compliance: "requirements",
+    draft: "compliance",
+    review: "draft",
+    score: "review",
+  };
+  const workflowPrimaryLabels = {
+    upload: "Go to Requirements",
     requirements: "Run Compliance Check",
     compliance: "Generate AI Draft",
     draft: "Run Reviewer",
     review: "Calculate Win Score",
-    score: "Start New RFP",
+    score: ratingAnalysis ? "Start New RFP" : "Calculate Win Score",
+  };
+  const primaryActionLabel = {
+    upload: workflowPrimaryLabels.upload,
+    requirements: workflowPrimaryLabels.requirements,
+    compliance: workflowPrimaryLabels.compliance,
+    draft: workflowPrimaryLabels.draft,
+    review: workflowPrimaryLabels.review,
+    score: workflowPrimaryLabels.score,
   }[activeTab];
   const primaryActionDisabled = {
     upload: requirements.length === 0 || isAnalyzing,
     requirements: requirements.length === 0 || isMatching,
-    compliance: Object.keys(matchMatrix).filter((key) => key !== "__debug").length === 0 || isDrafting,
+    compliance: complianceMatchCount === 0 || isDrafting,
     draft: proposalDrafts.length === 0 || isReviewing,
     review: !reviewResult || isPredicting,
-    score: false,
+    score: !ratingAnalysis && (requirements.length === 0 || isPredicting),
   }[activeTab];
 
   if (authLoading) {
@@ -1134,21 +1163,35 @@ export default function DashboardPage() {
               </div>
 
               <div className="flex flex-col gap-3 border-t border-purple-950/30 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <button
-                  onClick={goBackStep}
-                  disabled={activeStepIndex <= 0}
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-slate-800 bg-[#0a0a0f]/60 text-sm font-semibold text-slate-300 hover:border-purple-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                  Back
-                </button>
+                {workflowBackLabels[activeTab] ? (
+                  <button
+                    onClick={() => setActiveTab(workflowBackTargets[activeTab])}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-slate-800 bg-[#0a0a0f]/60 text-sm font-semibold text-slate-300 hover:border-purple-700"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    {workflowBackLabels[activeTab]}
+                  </button>
+                ) : (
+                  <div />
+                )}
                 <div className="flex flex-col gap-2 sm:flex-row">
-                  {activeTab === "score" && (
+                  {activeTab === "draft" && ratingAnalysis && (
                     <button
-                      onClick={() => setActiveTab("review")}
+                      onClick={() => setActiveTab("score")}
                       className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-slate-800 bg-[#0a0a0f]/60 text-sm font-semibold text-slate-300 hover:border-purple-700"
                     >
-                      Back to Reviewer
+                      Go to Win Score
+                      <ArrowRight className="h-4 w-4" />
+                    </button>
+                  )}
+                  {activeTab === "score" && ratingAnalysis && (
+                    <button
+                      onClick={executePredictScore}
+                      disabled={isPredicting || requirements.length === 0}
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-purple-800/60 bg-[#0a0a0f]/60 text-sm font-semibold text-purple-200 hover:border-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isPredicting ? <Loader className="h-4 w-4 animate-spin" /> : null}
+                      Recalculate Win Score
                     </button>
                   )}
                   <button
@@ -1158,7 +1201,7 @@ export default function DashboardPage() {
                   >
                     {isMatching || isDrafting || isReviewing || isPredicting ? <Loader className="h-4 w-4 animate-spin" /> : null}
                     <span>{primaryActionLabel}</span>
-                    {activeTab !== "score" ? <ArrowRight className="h-4 w-4" /> : null}
+                    {activeTab !== "score" || !ratingAnalysis ? <ArrowRight className="h-4 w-4" /> : null}
                   </button>
                 </div>
               </div>
@@ -1208,7 +1251,7 @@ export default function DashboardPage() {
                     onClick={() => setActiveTab("requirements")}
                     className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition flex items-center justify-center gap-2"
                   >
-                    Continue to Requirements
+                    Go to Requirements
                     <ArrowRight className="h-4 w-4" />
                   </button>
                 </div>
@@ -1275,7 +1318,14 @@ export default function DashboardPage() {
                   </tbody>
                 </table>
               </div>
-              <div className="flex justify-end pt-2">
+              <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-between">
+                <button
+                  onClick={() => setActiveTab("upload")}
+                  className="px-5 py-2.5 border border-slate-800 bg-[#0a0a0f]/60 hover:border-purple-700 text-slate-300 font-semibold text-xs rounded-lg transition flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  <span>Back to Upload</span>
+                </button>
                 <button
                   onClick={executeMatching}
                   disabled={isMatching || requirements.length === 0}
@@ -1360,56 +1410,116 @@ export default function DashboardPage() {
 
               <DiagnosticsPanel requirements={requirements} matchMatrix={matchMatrix} />
 
-              <div className="flex justify-between pt-2">
+              <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-between">
                 <button
-                  onClick={executeMatching}
-                  disabled={isMatching}
-                  className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white font-semibold text-xs rounded-lg transition flex items-center gap-2 cursor-pointer"
+                  onClick={() => setActiveTab("requirements")}
+                  className="px-5 py-2.5 border border-slate-800 bg-[#0a0a0f]/60 hover:border-purple-700 text-slate-300 font-semibold text-xs rounded-lg transition flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  {isMatching ? <Loader className="h-4 w-4 animate-spin" /> : null}
-                  <span>Recalculate Compliance Matrices</span>
+                  <ArrowLeft className="h-4 w-4" />
+                  <span>Back to Requirements</span>
                 </button>
-                <button
-                  onClick={() => handleGenerateDrafts({ requirement: selectedRequirement })}
-                  disabled={isDrafting || Object.keys(matchMatrix).filter((key) => key !== "__debug").length === 0}
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-semibold text-xs rounded-lg transition flex items-center gap-2 cursor-pointer"
-                >
-                  {isDrafting ? <Loader className="h-4 w-4 animate-spin" /> : null}
-                  <span>Generate AI Draft</span>
-                  <ArrowRight className="h-4 w-4" />
-                </button>
+                <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                  <button
+                    onClick={executeMatching}
+                    disabled={isMatching}
+                    className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white font-semibold text-xs rounded-lg transition flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {isMatching ? <Loader className="h-4 w-4 animate-spin" /> : null}
+                    <span>Run Compliance Check</span>
+                  </button>
+                  <button
+                    onClick={() => handleGenerateDrafts({ requirement: selectedRequirement })}
+                    disabled={isDrafting || complianceMatchCount === 0}
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-semibold text-xs rounded-lg transition flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {isDrafting ? <Loader className="h-4 w-4 animate-spin" /> : null}
+                    <span>Generate AI Draft</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
           {/* TAB 4: AI Draft Responses */}
           {activeTab === "draft" && (
-            <ProposalDraft
-              activeRequirement={selectedRequirement}
-              activeDraft={proposalDrafts[activeDraftIdx] ? {
-                id: proposalDrafts[activeDraftIdx].id,
-                section_title: proposalDrafts[activeDraftIdx].section,
-                content: proposalDrafts[activeDraftIdx].content,
-                status: proposalDrafts[activeDraftIdx].status
-              } : null}
-              onGenerateDraft={handleGenerateDrafts}
-              onSaveDraft={(content) => {
-                setEditedDraftValue(content);
-                handleUpdateDraft("edited", content);
-              }}
-              draftResponse={editedDraftValue}
-              isDrafting={isDrafting}
-              isSavingDraft={isSavingDraft}
-            />
+            <div className="space-y-4">
+              <ProposalDraft
+                activeRequirement={selectedRequirement}
+                activeDraft={proposalDrafts[activeDraftIdx] ? {
+                  id: proposalDrafts[activeDraftIdx].id,
+                  section_title: proposalDrafts[activeDraftIdx].section,
+                  content: proposalDrafts[activeDraftIdx].content,
+                  status: proposalDrafts[activeDraftIdx].status
+                } : null}
+                onGenerateDraft={handleGenerateDrafts}
+                onSaveDraft={(content) => {
+                  setEditedDraftValue(content);
+                  handleUpdateDraft("edited", content);
+                }}
+                draftResponse={editedDraftValue}
+                isDrafting={isDrafting}
+                isSavingDraft={isSavingDraft}
+              />
+              <div className="bg-[#1a1a2e] border border-purple-950/40 rounded-xl p-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <button
+                  onClick={() => setActiveTab("compliance")}
+                  className="px-5 py-2.5 border border-slate-800 bg-[#0a0a0f]/60 hover:border-purple-700 text-slate-300 font-semibold text-xs rounded-lg transition flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  <span>Back to Compliance</span>
+                </button>
+                <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                  {ratingAnalysis && (
+                    <button
+                      onClick={() => setActiveTab("score")}
+                      className="px-5 py-2.5 border border-purple-800/60 bg-[#0a0a0f]/60 hover:border-purple-500 text-purple-200 font-semibold text-xs rounded-lg transition flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <span>Go to Win Score</span>
+                      <ArrowRight className="h-4 w-4" />
+                    </button>
+                  )}
+                  <button
+                    onClick={handleReviewProposal}
+                    disabled={isReviewing || proposalDrafts.length === 0}
+                    className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white font-semibold text-xs rounded-lg transition flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {isReviewing ? <Loader className="h-4 w-4 animate-spin" /> : null}
+                    <span>Run Reviewer</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* TAB 5: Reviewer */}
           {activeTab === "review" && (
-            <ReviewerPanel
-              onRunReview={handleReviewProposal}
-              isReviewing={isReviewing}
-              reviewResult={reviewResult}
-            />
+            <div className="space-y-4">
+              <ReviewerPanel
+                onRunReview={handleReviewProposal}
+                isReviewing={isReviewing}
+                reviewResult={reviewResult}
+              />
+              <div className="bg-[#1a1a2e] border border-purple-950/40 rounded-xl p-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <button
+                  onClick={() => setActiveTab("draft")}
+                  className="px-5 py-2.5 border border-slate-800 bg-[#0a0a0f]/60 hover:border-purple-700 text-slate-300 font-semibold text-xs rounded-lg transition flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  <span>Back to AI Draft</span>
+                </button>
+                <button
+                  onClick={executePredictScore}
+                  disabled={isPredicting || !reviewResult}
+                  className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white font-semibold text-xs rounded-lg transition flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {isPredicting ? <Loader className="h-4 w-4 animate-spin" /> : null}
+                  <span>Calculate Win Score</span>
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
           )}
 
           {/* TAB 6: Win Score Diagnostic Dashboard */}
