@@ -93,10 +93,26 @@ export default async function handler(req, res) {
 
       if (error) throw error;
 
+      const workspaceIds = (data || []).map((workspace) => workspace.id);
+      let scoreMap = new Map();
+      if (workspaceIds.length) {
+        const { data: scores, error: scoreError } = await workspaceDb
+          .from("win_scores")
+          .select("*")
+          .in("workspace_id", workspaceIds);
+        if (!scoreError && Array.isArray(scores)) {
+          scoreMap = new Map(scores.map((score) => [score.workspace_id, score]));
+        }
+      }
+
       return res.status(200).json({
         success: true,
         mode: "dataset",
-        workspaces: data || [],
+        workspaces: (data || []).map((workspace) => ({
+          ...workspace,
+          win_score: scoreMap.get(workspace.id)?.total_score ?? null,
+          decision: scoreMap.get(workspace.id)?.decision ?? null,
+        })),
       });
     }
 

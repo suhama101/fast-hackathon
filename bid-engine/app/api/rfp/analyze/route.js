@@ -7,6 +7,7 @@ import {
   extractSectionAwareRequirements,
   flattenModelRequirements,
   mergeRequirementCandidates,
+  validateRequirementCandidates,
   toDbRequirementType,
 } from "../../../../lib/intelligence.js";
 import { runCrewStage } from "../../../../lib/crewBridge.js";
@@ -21,7 +22,7 @@ const buildRequirementRows = (requirements = [], workspaceId) =>
     requirement_text: requirement.requirement,
     requirement_type: toDbRequirementType(requirement.category),
     compliance_status: "partial",
-    extracted_value: requirement.source_text || requirement.requirement,
+    extracted_value: String(requirement.source_text || requirement.requirement).slice(0, 600),
   }));
 
 const countByCategory = (requirements = []) =>
@@ -149,6 +150,14 @@ ${rawText}`;
       expected_evidence_type: "Methodology",
     }));
 
+    const preValidationRequirements = [
+      ...llmRequirements,
+      ...heuristicRequirements,
+      ...taxonomyRequirements,
+    ];
+
+    const validation = validateRequirementCandidates(preValidationRequirements);
+
     const mergedRequirements = mergeRequirementCandidates(
       llmRequirements,
       heuristicRequirements,
@@ -164,6 +173,7 @@ ${rawText}`;
       source_text: requirement.source_text,
       needs_evidence: requirement.needs_evidence,
       expected_evidence_type: requirement.expected_evidence_type,
+      confidence_score: requirement.confidence_score,
       requirement_type: toDbRequirementType(requirement.category),
       compliance_status: "partial",
     }));
@@ -199,6 +209,14 @@ ${rawText}`;
     const diagnostics = {
       total_requirements: finalRequirements.length,
       category_counts: countByCategory(finalRequirements),
+      extraction_debug: {
+        raw_text_length: rawText.length,
+        sections_detected: new Set(finalRequirements.map((item) => item.source_section).filter(Boolean)).size,
+        requirements_before_validation: validation.diagnostics.requirements_before_validation,
+        requirements_after_validation: finalRequirements.length,
+        rejected_bad_chunks: validation.diagnostics.rejected_bad_chunks,
+        rejected_examples: validation.diagnostics.rejected_examples,
+      },
     };
 
     return NextResponse.json({
@@ -216,6 +234,7 @@ ${rawText}`;
         source_text: item.source_text,
         needs_evidence: item.needs_evidence,
         expected_evidence_type: item.expected_evidence_type,
+        confidence_score: item.confidence_score,
         requirement_type: item.requirement_type,
         compliance_status: item.compliance_status,
       })),

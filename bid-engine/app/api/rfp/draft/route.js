@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
 import { analyzeWithGroq } from "../../../../lib/groqClient";
 import { runCrewStage } from "../../../../lib/crewBridge";
+import { inferRequirementMetadata } from "../../../../lib/intelligence.js";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../../../../lib/requestAuth";
 
 const isUuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
 
-const buildEvidenceLockedContent = (sectionTitle, requirementText, matchedEvidence, matchStatus, expectedEvidenceType) => {
+const buildEvidenceLockedContent = (sectionTitle, requirementText, matchedEvidence, matchStatus, expectedEvidenceType, needsEvidence = true) => {
+  if (!needsEvidence) {
+    return `## ${sectionTitle}\n\nThis requirement is handled as an acknowledgement, declaration, submission, or form requirement. No project capability evidence is attached.\n\nRequirement: ${requirementText || sectionTitle}\n`;
+  }
+
   if (!matchedEvidence || matchStatus === "No Match") {
     return `## ${sectionTitle}\n\nNo verified supporting evidence was found. Required evidence: ${expectedEvidenceType || "supporting evidence"}.\n`;
   }
@@ -120,6 +125,7 @@ export async function POST(request) {
     }
 
     const evidenceByRequirement = requirements.map((item) => ({
+      ...inferRequirementMetadata(item.requirement_text, item.extracted_value, item.extracted_value),
       requirement_id: item.id,
       requirement_text: item.requirement_text,
       compliance_status: item.compliance_status,
@@ -214,7 +220,7 @@ Return ONLY valid JSON.`;
           return {
             section_title: section.section_title,
             requirement_id: reference.requirement_id || section.id,
-            content: buildEvidenceLockedContent(section.section_title, reference.requirement_text, evidenceLine, matchStatus, reference.expected_evidence_type),
+            content: buildEvidenceLockedContent(section.section_title, reference.requirement_text, evidenceLine, matchStatus, reference.expected_evidence_type, reference.needs_evidence !== false),
           };
         });
 
@@ -227,13 +233,14 @@ Return ONLY valid JSON.`;
         reference.requirement_text || draft.section_title,
         evidenceLine,
         matchStatus,
-        reference.expected_evidence_type
+        reference.expected_evidence_type,
+        reference.needs_evidence !== false
       );
       const normalizedContent = String(draft.content || "")
         .replace(/we confirm our ability/gi, "We have demonstrated experience")
         .replace(/holds? [^.\n]* capacity/gi, "has partial supporting evidence")
         .trim();
-      const appendedContent = matchStatus === "Strong Match" && normalizedContent
+      const appendedContent = matchStatus === "Strong Match" && reference.needs_evidence !== false && normalizedContent
         ? `\n\n${normalizedContent}`
         : "";
       return {

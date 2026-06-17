@@ -1,6 +1,7 @@
 import { CAPABILITY_LIBRARY } from "../../bid-engine/lib/sampleData.js";
 import { matchRequirementToCapabilities, extractEntitiesFromText } from "../../bid-engine/lib/datasetAnalysis.js";
 import { runCrewStage } from "../../bid-engine/lib/crewBridge.js";
+import { inferRequirementMetadata } from "../../bid-engine/lib/intelligence.js";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../_lib/requestAuth.js";
 import { getSupabaseAdminOrNull } from "../_lib/supabase.js";
 
@@ -29,12 +30,40 @@ const getQueryValue = (req, key) => {
   }
 };
 
-const draftFromTarget = (target, capability, extractedEntities) => {
+const buildEvidenceLockedContent = (sectionTitle, requirementText, matchedEvidence, matchStatus, expectedEvidenceType, needsEvidence = true) => {
+  if (!needsEvidence) {
+    return `# ${sectionTitle}\n\nThis requirement is handled as an acknowledgement, declaration, submission, or form requirement. No project capability evidence is attached.\n\nRequirement: ${requirementText || sectionTitle}`;
+  }
+
+  if (!matchedEvidence || matchStatus === "No Match") {
+    return `# ${sectionTitle}\n\nNo verified supporting evidence was found. Required evidence: ${expectedEvidenceType || "supporting evidence"}.`;
+  }
+
+  if (matchStatus === "Partial Match") {
+    return `# ${sectionTitle}\n\nAvailable evidence partially supports this requirement. Additional documentation should be reviewed before submission.\n\nEvidence reference: ${matchedEvidence}`;
+  }
+
+  return `# ${sectionTitle}\n\nWe have demonstrated experience relevant to this requirement.\n\nEvidence reference: ${matchedEvidence}`;
+};
+
+const draftFromTarget = (target) => {
   const sectionTitle = target.requirement_text?.slice(0, 80) || target.title || "Proposal Response Section";
-  const evidence = capability?.project_summary || capability?.description || capability?.project_name || "Relevant project evidence.";
+  const metadata = inferRequirementMetadata(target.requirement_text, target.extracted_value, target.extracted_value);
+  const matchStatus = String(target.compliance_status || "").toLowerCase() === "pass"
+    ? "Strong Match"
+    : String(target.compliance_status || "").toLowerCase() === "partial"
+      ? "Partial Match"
+      : "No Match";
   return {
     section_title: sectionTitle,
-    content: `# ${sectionTitle}\n\n## Compliance Response\nWe confirm our ability to meet the requirement: ${target.requirement_text || "Target requirement"}. Our relevant evidence includes ${evidence}.\n\n## Supporting Evidence\n- ${evidence}\n- Considered deadlines: ${(extractedEntities.deadlines || []).slice(0, 3).join(", ") || "None detected"}\n- Considered budgets: ${(extractedEntities.budgets || []).slice(0, 3).join(", ") || "None detected"}\n\n## Draft Position\nThis response is prepared for immediate review and approval.`,
+    content: buildEvidenceLockedContent(
+      sectionTitle,
+      target.requirement_text,
+      target.matched_evidence,
+      matchStatus,
+      metadata.expected_evidence_type,
+      metadata.needs_evidence !== false
+    ),
     requirement_id: target.id,
   };
 };
@@ -152,11 +181,7 @@ export default async function handler(req, res) {
       }
 
       if (!draftsList.length) {
-        draftsList = targets.map((target, index) => {
-          const match = matchRequirementToCapabilities(target, capabilitySource, { entities: extractedEntities });
-          const capability = match.capability || capabilitySource[index % capabilitySource.length];
-          return draftFromTarget(target, capability, extractedEntities);
-        });
+        draftsList = targets.map((target) => draftFromTarget(target));
       }
 
       await workspaceDb.from("proposal_drafts").delete().eq("workspace_id", workspaceId);
@@ -181,19 +206,19 @@ export default async function handler(req, res) {
         await workspaceDb.from("ai_decision_trace").insert(
           draftsList.map((draft, index) => {
             const target = targets[index % targets.length] || {};
-            const match = matchRequirementToCapabilities(target, capabilitySource, { entities: extractedEntities });
+            const metadata = inferRequirementMetadata(target.requirement_text, target.extracted_value, target.extracted_value);
             return {
               workspace_id: workspaceId,
               requirement_id: target.id || null,
               requirement_text: target.requirement_text || draft.section_title || "",
-              evidence_document_id: match.capability?.id || null,
-              evidence_text: match.evidence || "",
-              rerank_score: match.confidence || null,
-              compliance_status: match.compliance_status || null,
+              evidence_document_id: null,
+              evidence_text: target.matched_evidence || "",
+              rerank_score: target.match_confidence || null,
+              compliance_status: target.compliance_status || null,
               draft_section_title: draft.section_title || null,
               trace: {
                 draft,
-                match,
+                needs_evidence: metadata.needs_evidence,
               },
             };
           })

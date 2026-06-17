@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { UploadCloud, FileText, CheckCircle, AlertCircle, ArrowRight, Loader } from "lucide-react";
+import { UploadCloud, FileText, CheckCircle, AlertCircle, ArrowRight, Loader, FileUp } from "lucide-react";
 
 const SAMPLE_RFPS = [
   { label: "IT Services",    fileName: "rfp-it-services.txt",             path: "/sample-rfps/rfp-it-services.txt" },
@@ -227,15 +227,15 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
   };
 
   return (
-    <div className="bg-[#1a1a2e] p-6 rounded-xl border border-purple-950/40 shadow-xl space-y-6" id="file-upload-section">
+    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-200/70 space-y-6" id="file-upload-section">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between pb-4 border-b border-purple-950/20 gap-4">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between pb-4 border-b border-slate-100 gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-            <UploadCloud className="text-purple-400 h-5 w-5" />
+          <h2 className="text-xl font-bold text-slate-950 tracking-tight flex items-center gap-2">
+            <UploadCloud className="text-blue-600 h-5 w-5" />
             Upload RFP Document
           </h2>
-          <p className="text-slate-400 text-sm mt-1">
+          <p className="text-slate-500 text-sm mt-1">
             Upload a PDF or DOCX file — text is extracted automatically before AI analysis.
           </p>
         </div>
@@ -243,7 +243,7 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
           <select
             value={selectedSampleRfp}
             onChange={(e) => setSelectedSampleRfp(e.target.value)}
-            className="px-3 py-1.5 bg-[#0a0a0f] border border-purple-950/50 text-purple-300 text-xs font-mono rounded focus:outline-none focus:border-purple-500"
+            className="px-3 py-2 bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl focus:outline-none focus:border-blue-400"
           >
             {SAMPLE_RFPS.map((s) => (
               <option key={s.path} value={s.path}>{s.label}</option>
@@ -251,7 +251,7 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
           </select>
           <button
             onClick={loadSampleRfp}
-            className="px-3.5 py-1.5 bg-[#0a0a0f] border border-purple-950/50 hover:border-purple-500 text-purple-300 text-xs font-mono font-medium rounded transition"
+            className="px-3.5 py-2 bg-white border border-slate-200 hover:border-blue-300 hover:bg-blue-50 text-blue-700 text-xs font-bold rounded-xl transition"
           >
             Load Sample RFP
           </button>
@@ -262,12 +262,12 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
       {alertMsg && (
         <div className={`p-4 rounded-lg flex items-start gap-3 text-sm ${
           alertMsg.type === "success"
-            ? "bg-emerald-950/35 text-emerald-300 border border-emerald-900/50"
-            : "bg-rose-950/35 text-rose-300 border border-rose-900/50"
+            ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+            : "bg-rose-50 text-rose-700 border border-rose-200"
         }`}>
           {alertMsg.type === "success"
-            ? <CheckCircle className="h-5 w-5 shrink-0 text-emerald-400" />
-            : <AlertCircle className="h-5 w-5 shrink-0 text-rose-400" />}
+            ? <CheckCircle className="h-5 w-5 shrink-0 text-emerald-500" />
+            : <AlertCircle className="h-5 w-5 shrink-0 text-rose-500" />}
           <div>{alertMsg.text}</div>
         </div>
       )}
@@ -278,8 +278,8 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
         onDragLeave={handleDrag} onDrop={handleDrop}
         className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-300 ${
           dragActive
-            ? "border-purple-500 bg-purple-950/20"
-            : "border-purple-950/40 bg-[#0a0a0f] hover:border-purple-500/40"
+            ? "border-blue-500 bg-blue-50 scale-[1.01] shadow-lg shadow-blue-100"
+            : "border-slate-300 bg-slate-50 hover:border-blue-400 hover:bg-white hover:shadow-md"
         }`}
       >
         <input
@@ -288,10 +288,12 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
           onChange={handleFileInput}
         />
         <label htmlFor="rfp-file-input" className="cursor-pointer block">
-          <UploadCloud className="h-12 w-12 text-purple-400/70 mx-auto mb-3" />
-          <p className="text-slate-200 font-medium">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-white text-blue-600 shadow-sm ring-1 ring-slate-200">
+            <FileUp className="h-8 w-8" />
+          </div>
+          <p className="text-slate-800 font-semibold">
             Drag and drop your <strong>PDF</strong> or <strong>DOCX</strong> here, or{" "}
-            <span className="text-purple-400 hover:text-purple-300 underline">browse files</span>
+            <span className="text-blue-600 hover:text-blue-700 underline">browse files</span>
           </p>
           <p className="text-slate-500 text-xs mt-1.5">
             PDF parsed in browser · DOCX parsed on server · Max 4 MB
@@ -300,17 +302,17 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
 
         {progress > 0 && progress < 100 && (
           <div className="mt-4 max-w-xs mx-auto space-y-1.5">
-            <div className="flex justify-between text-[11px] font-mono text-slate-400">
+            <div className="flex justify-between text-[11px] font-mono text-slate-500">
               <span>Extracting text...</span><span>{progress}%</span>
             </div>
-            <div className="w-full bg-[#1a1a2e] h-1.5 rounded-full overflow-hidden">
-              <div className="bg-purple-500 h-full rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
+            <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
+              <div className="bg-blue-600 h-full rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
             </div>
           </div>
         )}
 
         {fileName && (
-          <div className="mt-3 inline-flex items-center gap-2 px-3 py-1 bg-purple-950/40 border border-purple-900/40 rounded-full text-purple-300 text-xs font-mono">
+          <div className="mt-3 inline-flex items-center gap-2 px-3 py-1 bg-blue-50 border border-blue-200 rounded-full text-blue-700 text-xs font-semibold">
             <FileText className="h-3.5 w-3.5" />
             <span>Ready: {fileName}</span>
           </div>
@@ -319,14 +321,14 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
 
       {/* Text Preview */}
       <div className="space-y-2">
-        <label className="text-xs font-bold uppercase tracking-wider text-purple-300 font-mono block">
+        <label className="text-xs font-bold uppercase tracking-wider text-slate-500 font-mono block">
           Extracted Text Preview (editable)
         </label>
         <textarea
           value={previewText}
           onChange={handlePreviewChange}
           placeholder="Or paste RFP text directly here..."
-          className="w-full h-48 bg-[#0a0a0f] text-slate-200 p-4 rounded-xl border border-purple-950/40 focus:outline-none focus:border-purple-500 font-mono text-xs leading-relaxed"
+          className="w-full h-48 bg-slate-50 text-slate-800 p-4 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-400 focus:bg-white font-mono text-xs leading-relaxed"
         />
       </div>
 
@@ -335,7 +337,7 @@ export default function FileUpload({ onTextParsed, isProcessing, initialText = "
         <button
           onClick={handleSubmitText}
           disabled={isProcessing || !rfpText.trim()}
-          className="w-full sm:w-auto px-6 py-3 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-semibold rounded-xl transition duration-200 flex items-center justify-center gap-2 cursor-pointer"
+          className="w-full sm:w-auto px-6 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-200 disabled:text-slate-500 text-white font-semibold rounded-xl transition duration-200 flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-blue-600/20 hover:-translate-y-0.5"
         >
           {isProcessing ? (
             <><Loader className="h-5 w-5 animate-spin" /><span>AI is analyzing your document...</span></>

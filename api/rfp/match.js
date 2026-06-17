@@ -139,6 +139,7 @@ export default async function handler(req, res) {
 
     const matches = [];
     const ragWarnings = [];
+    const matchingDebug = [];
     for (const [index, requirement] of requirements.entries()) {
       const normalized = normalizeRequirement(requirement, index);
       const requirementMeta = inferRequirementMetadata(
@@ -146,6 +147,44 @@ export default async function handler(req, res) {
         normalized.source_section || "",
         normalized.requirement_text
       );
+
+      if (requirementMeta.needs_evidence === false) {
+        const acknowledgement = {
+          requirement_id: normalized.id,
+          requirement_text: normalized.requirement_text,
+          compliance_status: "partial",
+          confidence_score: 0,
+          evidence: "Acknowledgement/declaration requirement. No capability evidence attached.",
+          selected_evidence: "",
+          retrieved_chunks: [],
+          reasoning: "RAG skipped because this requirement does not require capability evidence.",
+          match_status: "Partial Match",
+          match_score: 0,
+          evidence_items: [],
+          source_references: [],
+          matched_terms: [],
+          needs_evidence: false,
+          vector_search_used: false,
+          fallback_used: false,
+          traceability: {
+            query: normalized.requirement_text,
+            approved_evidence: null,
+            rejected_candidates: [],
+            needs_evidence: false,
+          },
+        };
+        matches.push(acknowledgement);
+        matchingDebug.push({
+          requirement: normalized.requirement_text,
+          needs_evidence: false,
+          retrieved_count: 0,
+          selected_evidence: "",
+          match_status: acknowledgement.match_status,
+          reason: acknowledgement.reasoning,
+        });
+        continue;
+      }
+
       const evidence = await retrieveCapabilityEvidence(
         { ...normalized, category: requirementMeta.category },
         capabilityIndex,
@@ -171,11 +210,24 @@ export default async function handler(req, res) {
         match_status: evidence.match_status,
         match_score: evidence.match_score,
         evidence_items: evidence.evidence_items || [],
+        retrieved_chunks: evidence.retrieved_chunks || [],
+        selected_evidence: evidence.selected_evidence || evidence.matched_evidence || evidence.evidence || "",
         source_references: evidence.source_references || [],
         matched_terms: evidence.matched_terms || [],
+        needs_evidence: true,
+        vector_search_used: !evidence.rag_warning,
+        fallback_used: false,
         rag_warning: evidence.rag_warning || null,
         rag_details: evidence.rag_details || null,
         traceability: evidence.traceability || null,
+      });
+      matchingDebug.push({
+        requirement: normalized.requirement_text,
+        needs_evidence: true,
+        retrieved_count: evidence.retrieved_chunks?.length || evidence.evidence_items?.length || 0,
+        selected_evidence: evidence.selected_evidence || evidence.matched_evidence || evidence.evidence || "",
+        match_status: evidence.match_status,
+        reason: evidence.reason,
       });
     }
 
@@ -229,7 +281,10 @@ export default async function handler(req, res) {
         match_confidence: match?.confidence_score,
         match_reasoning: match?.reasoning,
         evidence_items: match?.evidence_items || [],
+        retrieved_chunks: match?.retrieved_chunks || [],
+        selected_evidence: match?.selected_evidence || "",
         match_status: match?.match_status || "No Match",
+        needs_evidence: match?.needs_evidence !== false,
         rag_warning: match?.rag_warning || null,
       };
     });
@@ -243,6 +298,17 @@ export default async function handler(req, res) {
       capability_count: capabilities.length,
       rag_seed: ragSeedStats,
       extracted_entities: entityContext,
+      matching_debug: matchingDebug,
+      rag_debug: {
+        rag_status: ragWarnings.length ? "NOT_READY" : "ACTIVE",
+        capability_rows: capabilities.length,
+        evidence_rows_before: ragSeedStats?.existingRows ?? null,
+        evidence_rows_after: ragSeedStats?.finalRows ?? ragSeedStats?.existingRows ?? null,
+        embedding_provider: capabilityIndex[0]?.embedding_model || "local-hashing-1536",
+        chunks_created: ragSeedStats?.documentsChunked || 0,
+        vector_search_used: matches.some((match) => match.vector_search_used),
+        fallback_used: false,
+      },
       rag_warning: ragWarnings.length
         ? "RAG corpus is empty or unavailable for at least one requirement. See rag_warnings."
         : null,

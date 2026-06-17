@@ -35,10 +35,20 @@ const BOILERPLATE_PHRASES = [
   "indicative terms for the bidders",
   "further details on the services required are provided",
   "should check the accuracy, reliability and completeness",
+  "request for proposal",
+  "instructions to bidders",
+  "table of contents",
+  "country pakistan",
+  "procurement policy",
+  "award criteria",
 ];
 
-const ACTION_VERB_PATTERN = /\b(must|shall|required|required to|should|need to|may not|must not|not exceed|at least|no later than|within|provide|submit|include|attach|demonstrate|validate|undertake|deliver|comply|disclose|declare|initial|sign|register|maintain|participate|respond|quote|present|complete|attend|travel|support|monitor|manage|report|staff|recover|restore|backup|configure|deploy|secure|ensure|operate|resolve|train|document|transition|implement|perform|conduct|preserve|protect|guarantee)\b/i;
-const SPECIFIC_DETAIL_PATTERN = /\b(\d+%|\d+\s*(days?|weeks?|months?)|ntn|pkr|usd|email|address|proposal validity|page limit|hard copy|soft copy|blacklist|blacklisting|conflict of interest|related party|anti[-\s]?fraud|anti[-\s]?corruption|deliverable|evaluation criteria|scoring|deadline|closing date|submission|support|reporting|staffing|recovery|continuity|backup|restore|failover|resilience|helpdesk|monitoring|sla|uptime|availability|incident response|cybersecurity|cloud|network|server)\b/i;
+const ACTION_VERB_PATTERN = /\b(must|shall|required|required to|eligible|mandatory|should|need to|may not|must not|not exceed|at least|no later than|within|provide|submit|include|attach|demonstrate|validate|undertake|deliver|comply|disclose|declare|initial|sign|register|maintain|participate|respond|quote|present|complete|attend|travel|support|monitor|manage|report|staff|recover|restore|backup|configure|deploy|secure|ensure|operate|resolve|train|document|transition|implement|perform|conduct|preserve|protect|guarantee)\b/i;
+const SPECIFIC_DETAIL_PATTERN = /\b(\d+%|\d+\s*(days?|weeks?|months?|years?)|ntn|tax number|pkr|usd|email|address|registration|certificate|proposal validity|page limit|hard copy|soft copy|technical proposal|financial proposal|blacklist|blacklisting|conflict of interest|related party|anti[-\s]?fraud|anti[-\s]?corruption|deliverable|evaluation criteria|scoring|deadline|closing date|submission|experience|support|reporting|staffing|recovery|continuity|backup|restore|failover|resilience|helpdesk|monitoring|sla|uptime|availability|incident response|cybersecurity|cloud|network|server)\b/i;
+const EVALUATION_SIGNAL_PATTERN = /\b(evaluation criteria|scoring|marks?|points?|weight|weighted|technical evaluation|financial evaluation|minimum score|pass mark)\b/i;
+const NON_EVIDENCE_PATTERN = /\b(one proposal per bidder|proposal validity|submission deadline|closing date|submit .*technical proposal|submit .*financial proposal|financial proposal.*(pkr|separate|separately|sealed|envelope)|technical proposal.*(separate|separately|sealed|envelope|follow|structure)|pricing schedule|conflict of interest|related party|fraud|corruption|blacklist|blacklisting|confidentiality|declaration|undertaking|acknowledg(e|ement)|separate envelope|separately sealed|submit .*form|provide .*form|tax number|ntn|registration certificate|registered in pakistan)\b/i;
+const CAPABILITY_EVIDENCE_PATTERN = /\b(similar experience|similar projects?|past projects?|experience supporting|experience with|\d+\s+years?.*experience|years?.*experience|enterprise .*experience|technical expertise|methodology|staff qualifications?|team cv|curriculum vitae|business continuity|disaster recovery|cybersecurity|payment systems?|reporting capability|implementation approach|work plan|project team|support services?|training|fleet management|platform|deploy|operate|maintain|sla|helpdesk)\b/i;
+const PAGE_CHUNK_PATTERN = /\b(request for proposal|instructions to bidders|award criteria|table of contents|country pakistan|section\s+\d+|chapter\s+\d+|appendix|annex|background|introduction|procurement policy|terms of reference)\b/i;
 
 const COMPLETE_CLAUSE_ENDINGS = [
   /shall be$/i,
@@ -53,7 +63,7 @@ const COMPLETE_CLAUSE_ENDINGS = [
 ];
 
 const SPLIT_CLAUSE_PATTERN = /(?:\s*;\s*|\.\s+|\s+(?:and|or)\s+(?=(?:provide|support|monitor|manage|maintain|report|deliver|implement|deploy|ensure|conduct|prepare|submit|include|respond|review|train|recover|restore|backup|document|configure|secure|operate|transition|staff|preserve|protect|guarantee))|,\s+(?=(?:provide|support|monitor|manage|maintain|report|deliver|implement|deploy|ensure|conduct|prepare|submit|include|respond|review|train|recover|restore|backup|document|configure|secure|operate|transition|staff|preserve|protect|guarantee)))/i;
-const SPLIT_HEADLINE_CLAUSE_PATTERN = /\s+(?=(?:the|this|each|all|any|bidder|bidders|vendor|vendors|consultant|consultants|contractor|contractors|team|proposal|proposals)\b[^.]{0,180}\b(?:must|shall|required|required to|should|need to|provide|submit|include|attach|demonstrate|comply|deliver|ensure|maintain|register|disclose|declare|support|recover|restore|backup|report|present|complete|respond)\b)/i;
+const SPLIT_HEADLINE_CLAUSE_PATTERN = /\s+(?=(?:the|this|each|all|any|bidder|bidders|vendor|vendors|consultant|consultants|contractor|contractors|team)\b[^.]{0,180}\b(?:must|shall|required|required to|should|need to|provide|submit|include|attach|demonstrate|comply|deliver|ensure|maintain|register|disclose|declare|support|recover|restore|backup|report|present|complete|respond)\b)/i;
 
 const FRAGMENT_ENDINGS = [
   /to the$/i,
@@ -73,6 +83,15 @@ const FRAGMENT_ENDINGS = [
   /the$/i,
   /a$/i,
   /an$/i,
+  /must follow$/i,
+  /proposal validity for$/i,
+  /required commercial format$/i,
+  /including$/i,
+  /network$/i,
+  /compliance$/i,
+  /confidentiality$/i,
+  /and$/i,
+  /,$/i,
 ];
 
 const CATEGORY_RULES = [
@@ -182,12 +201,12 @@ export const inferRequirementMetadata = (requirementText, sectionName = "", sour
 
   let needsEvidence = true;
   let expectedEvidenceType = rule.expectedEvidenceType;
-  if (rule.category === "Deadline") {
+  if (rule.category === "Deadline" || NON_EVIDENCE_PATTERN.test(text)) {
     needsEvidence = false;
   }
 
   if (/evaluation criteria|scoring weights?|marks?|points?/i.test(text)) {
-    needsEvidence = true;
+    needsEvidence = false;
   }
 
   if (/project team|team cv|curriculum vitae|cv\b/i.test(text)) {
@@ -198,11 +217,11 @@ export const inferRequirementMetadata = (requirementText, sectionName = "", sour
     expectedEvidenceType = "Disaster Recovery";
   } else if (/deliverable|inception report|final report|presentation|phase\s*\d+\s*report/i.test(text)) {
     expectedEvidenceType = "Work Plan";
-  } else if (/similar projects?|past project|experience with|support services?|training|fleet management solution|implementation team|solution|system|platform|deploy|merchant segmentation|payment systems?|digital financial services|stakeholder engagement/i.test(text)) {
+  } else if (/similar projects?|past project|experience supporting|experience with|\d+\s+years?.*experience|years?.*experience|enterprise .*experience|support services?|training|fleet management solution|implementation team|solution|system|platform|deploy|merchant segmentation|payment systems?|digital financial services|stakeholder engagement/i.test(text)) {
     expectedEvidenceType = "Past Project";
   }
 
-  if (/similar projects?|past project|experience with|project team|methodology|work plan|support services?|training|fleet management solution|implementation team/i.test(text)) {
+  if (CAPABILITY_EVIDENCE_PATTERN.test(text)) {
     needsEvidence = true;
   }
 
@@ -261,6 +280,8 @@ const firstActionVerbIndex = (text) => {
     "must",
     "shall",
     "required to",
+    "eligible",
+    "mandatory",
     "should",
     "need to",
     "provide",
@@ -275,6 +296,8 @@ const firstActionVerbIndex = (text) => {
     "register",
     "disclose",
     "declare",
+    "disclose",
+    "provide",
     "recover",
     "restore",
     "backup",
@@ -294,13 +317,68 @@ const isNoisyCompositeRequirement = (text) => {
   const normalized = normalizeRequirementCandidate(text);
   const tokenCount = normalized.split(/\s+/).filter(Boolean).length;
   if (!normalized) return true;
-  if (normalized.length > 320) return true;
+  if (normalized.length > 250) return true;
   if (normalized.includes("[[PAGE")) return true;
   const actionIndex = firstActionVerbIndex(normalized);
   if (tokenCount >= 18 && actionIndex > 80) return true;
   if (tokenCount >= 24 && titleCaseChunkCount(normalized) >= 4 && actionIndex > 0) return true;
   if (tokenCount >= 28 && !/[.!?;]/.test(normalized) && titleCaseChunkCount(normalized) >= 3) return true;
   return false;
+};
+
+const isSectionOrDocumentNoise = (text) => {
+  const normalized = normalizeRequirementCandidate(text);
+  const lower = normalized.toLowerCase();
+  if (!normalized) return true;
+  if (SECTION_MARKERS.some((pattern) => pattern.test(normalized))) return true;
+  if (/^\d+(\.\d+)*\.?\s*(instructions to bidders|award criteria|submission|background|introduction|terms of reference)$/i.test(normalized)) return true;
+  if (/^(request for proposal|rfp|country|project name|client|address|tel|phone|email|website)\b/i.test(normalized)) return true;
+  if (/^(section|chapter|part|schedule|annex|appendix)\s+\d?/i.test(normalized)) return true;
+  if (PAGE_CHUNK_PATTERN.test(lower) && !ACTION_VERB_PATTERN.test(normalized)) return true;
+  if (BOILERPLATE_PHRASES.some((phrase) => lower.includes(phrase)) && !ACTION_VERB_PATTERN.test(normalized)) return true;
+  if ((normalized.match(/\b[A-Z][A-Z\s]{4,}\b/g) || []).length >= 2 && !ACTION_VERB_PATTERN.test(normalized)) return true;
+  return false;
+};
+
+const sourcePageFromText = (text) => {
+  const match = String(text || "").match(PAGE_MARKER_REGEX);
+  return match ? Number(match[1] || match[2]) : null;
+};
+
+const normalizeAtomicRequirement = (text) => {
+  const normalized = trimLeadingClauseNoise(normalizeRequirementCandidate(text))
+    .replace(/^(the\s+)?(bidder|vendor|consultant|firm|contractor)\s+(is\s+)?(required to|shall|must)\s+/i, "Bidder must ")
+    .replace(/^must\s+/i, "Bidder must ")
+    .replace(/^shall\s+/i, "Bidder must ")
+    .replace(/^submit\s+/i, "Bidder must submit ")
+    .replace(/^provide\s+/i, "Bidder must provide ")
+    .replace(/^disclose\s+/i, "Bidder must disclose ")
+    .replace(/^declare\s+/i, "Bidder must declare ")
+    .replace(/^comply\s+/i, "Bidder must comply ");
+  return normalized ? `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}` : "";
+};
+
+const requirementConfidence = (text) => {
+  let score = 0.35;
+  if (ACTION_VERB_PATTERN.test(text)) score += 0.25;
+  if (SPECIFIC_DETAIL_PATTERN.test(text)) score += 0.20;
+  if (/\b(bidder|vendor|consultant|firm|proposal|technical proposal|financial proposal|document|certificate|registration|experience)\b/i.test(text)) score += 0.15;
+  if (isSectionOrDocumentNoise(text)) score -= 0.45;
+  if (text.length > 180) score -= 0.10;
+  return Math.max(0, Math.min(0.98, Number(score.toFixed(2))));
+};
+
+const rejectReason = (text) => {
+  const normalized = normalizeRequirementCandidate(text);
+  if (!normalized || normalized.length < 12) return "too_short";
+  if (normalized.length > 250) return "too_long_or_page_chunk";
+  if (isSectionOrDocumentNoise(normalized)) return "section_header_or_document_noise";
+  if (BOILERPLATE_PHRASES.some((phrase) => normalized.toLowerCase().includes(phrase))) return "boilerplate";
+  if (FRAGMENT_ENDINGS.some((pattern) => pattern.test(normalized.trim()))) return "fragment";
+  if (!ACTION_VERB_PATTERN.test(normalized) && !EVALUATION_SIGNAL_PATTERN.test(normalized) && !SPECIFIC_DETAIL_PATTERN.test(normalized)) return "not_actionable";
+  if (!/\b(bidder|vendor|consultant|contractor|firm|company|proposal|document|certificate|registration|experience|methodology|team|deadline|submission|deliverable|work plan|financial proposal|technical proposal|conflict|related party|fraud|corruption|blacklist|ntn|tax)\b/i.test(normalized)) return "missing_procurement_subject";
+  if (isNoisyCompositeRequirement(normalized)) return "noisy_composite";
+  return "";
 };
 
 const splitAtomicClauses = (text) =>
@@ -321,14 +399,15 @@ const splitAtomicClauses = (text) =>
 
 const likelyRequirement = (line) => {
   const normalized = trimLeadingClauseNoise(normalizeRequirementCandidate(line));
-  if (normalized.length < 12 || normalized.length > 260) return false;
+  if (normalized.length < 12 || normalized.length > 250) return false;
+  if (isSectionOrDocumentNoise(normalized)) return false;
   if (BOILERPLATE_PHRASES.some((phrase) => normalized.toLowerCase().includes(phrase))) return false;
   if (COMPLETE_CLAUSE_ENDINGS.some((pattern) => pattern.test(normalized))) return false;
   if (FRAGMENT_ENDINGS.some((pattern) => pattern.test(normalized.trim()))) return false;
   if (isNoisyCompositeRequirement(normalized)) return false;
 
   const tokenCount = normalized.split(/\s+/).filter(Boolean).length;
-  const hasActionVerb = /\b(must|shall|required|required to|should|need to|may not|must not|not exceed|at least|no later than|within|provide|submit|include|attach|demonstrate|validate|undertake|deliver|comply|disclose|declare|initial|sign|register|maintain|participate|respond|quote|present|complete|attend|travel|report|recover|restore|backup|ensure)\b/i.test(normalized);
+  const hasActionVerb = ACTION_VERB_PATTERN.test(normalized);
   const hasSpecificDetail = /\b(\d+%|\d+\s*(days?|weeks?|months?)|ntn|pkr|usd|email|address|proposal validity|page limit|hard copy|soft copy|blacklist|blacklisting|conflict of interest|related party|anti[-\s]?fraud|anti[-\s]?corruption|deliverable|evaluation criteria|scoring|deadline|closing date|submission|reporting|staffing|recovery|continuity|backup|restore|failover|resilience|help desk|monitoring|sla|uptime|availability|incident response|cybersecurity|server|business continuity)\b/i.test(normalized);
   const hasRequirementSubject = /\b(bidder|bidders|vendor|vendors|consultant|consultants|contractor|contractors|firm|firms|company|proposal|technical proposal|financial proposal|document|documents|deliverable|deliverables|budget|invoice|team|member|members|applicant|applicants|consortium|joint venture|jv|schedule|response|report|work plan|methodology|payment|pricing|price|solution|service|services)\b/i.test(normalized);
 
@@ -350,19 +429,76 @@ const requirementSpecificityScore = (line) => {
 };
 
 const createRequirement = ({ line, sectionName, pageNumber, sourceText, categoryHint }) => {
-  const metadata = inferRequirementMetadata(line, sectionName, line);
+  const normalizedLine = normalizeAtomicRequirement(line);
+  const metadata = inferRequirementMetadata(normalizedLine, sectionName, line);
   const combinedCategory = categoryHint || metadata.category;
   return {
-    requirement: line,
+    requirement: normalizedLine,
     category: combinedCategory,
     priority: metadata.priority,
     source_section: sectionName || "Unknown Section",
-    source_page: pageNumber || null,
+    source_page: pageNumber || sourcePageFromText(sourceText) || null,
     source_text: sourceText || line,
     needs_evidence: metadata.needs_evidence,
     expected_evidence_type: metadata.expected_evidence_type,
+    confidence_score: requirementConfidence(normalizedLine),
   };
 };
+
+export function validateRequirementCandidates(candidates = []) {
+  const accepted = [];
+  const rejected = [];
+
+  candidates.forEach((candidate) => {
+    const sourceText = candidate.source_text || candidate.sourceText || candidate.requirement || candidate.requirement_text || "";
+    const parts = splitAtomicClauses(candidate.requirement || candidate.requirement_text || candidate.text || "");
+
+    parts.forEach((part) => {
+      const requirement = normalizeAtomicRequirement(part);
+      const reason = rejectReason(requirement);
+      if (reason) {
+        rejected.push({ requirement, reason, source_text: sourceText });
+        return;
+      }
+
+      const metadata = inferRequirementMetadata(
+        requirement,
+        candidate.source_section || candidate.sourceSection || "",
+        sourceText
+      );
+
+      accepted.push({
+        requirement,
+        category: candidate.category || metadata.category,
+        priority: candidate.priority || metadata.priority,
+        source_section: candidate.source_section || candidate.sourceSection || "Unknown Section",
+        source_page: candidate.source_page || candidate.sourcePage || sourcePageFromText(sourceText),
+        source_text: sourceText || requirement,
+        needs_evidence: candidate.needs_evidence ?? metadata.needs_evidence,
+        expected_evidence_type: candidate.expected_evidence_type || candidate.expectedEvidenceType || metadata.expected_evidence_type,
+        confidence_score: candidate.confidence_score || requirementConfidence(requirement),
+      });
+    });
+  });
+
+  const deduped = dedupeByKey(
+    accepted
+      .filter((item) => requirementConfidence(item.requirement) >= 0.45)
+      .sort((left, right) => Number(right.confidence_score || 0) - Number(left.confidence_score || 0)),
+    (item) => normalize(item.requirement)
+  );
+
+  return {
+    requirements: deduped,
+    rejected,
+    diagnostics: {
+      requirements_before_validation: candidates.length,
+      requirements_after_validation: deduped.length,
+      rejected_bad_chunks: rejected.length,
+      rejected_examples: rejected.slice(0, 8),
+    },
+  };
+}
 
 export function extractSectionAwareRequirements(rawText = "") {
   const text = cleanText(rawText);
@@ -450,18 +586,25 @@ export function extractSectionAwareRequirements(rawText = "") {
     ["deliverable", "Provide all stated deliverables on time."],
   ];
 
+  const sourceExcerptFor = (needle) => {
+    const lower = text.toLowerCase();
+    const index = lower.indexOf(needle);
+    if (index < 0) return needle;
+    return text.slice(Math.max(0, index - 220), Math.min(text.length, index + 360));
+  };
+
   keywordClauses.forEach(([needle, requirement]) => {
     if (text.toLowerCase().includes(needle)) {
       results.push(createRequirement({
         line: requirement,
         sectionName: "Heuristic Extraction",
         pageNumber: null,
-        sourceText: text,
+        sourceText: sourceExcerptFor(needle),
       }));
     }
   });
 
-  return dedupeByKey(
+  const validated = validateRequirementCandidates(
     results
       .map((item) => ({
         ...item,
@@ -469,9 +612,11 @@ export function extractSectionAwareRequirements(rawText = "") {
       }))
       .filter((item) => item._score >= 2)
       .sort((left, right) => right._score - left._score || right.requirement.length - left.requirement.length)
-      .slice(0, 60),
-    (item) => normalize(item.requirement)
-  ).map(({ _score, ...item }) => item);
+      .slice(0, 80)
+      .map(({ _score, ...item }) => item)
+  );
+
+  return validated.requirements.slice(0, 60);
 }
 
 const FIELD_RULES = {
@@ -569,7 +714,7 @@ export function mergeRequirementCandidates(...groups) {
     };
   }).filter(Boolean);
 
-  return dedupeByKey(rows, (item) => normalize(item.requirement));
+  return validateRequirementCandidates(rows).requirements;
 }
 
 export function toDbRequirementType(category = "") {

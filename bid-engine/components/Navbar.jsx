@@ -1,130 +1,111 @@
 "use client";
 
 import React, { useState } from "react";
-import { FileText, Award, ShieldAlert, LogOut, CheckCircle, Menu, X, Cpu, ClipboardCheck } from "lucide-react";
+import { Home, History, LogOut, Menu, Settings, Sparkles, X } from "lucide-react";
 
-export default function Navbar({ activeTab, setActiveTab, userEmail, onSignOut }) {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+export default function Navbar({
+  activeTab,
+  setActiveTab,
+  userEmail,
+  onSignOut,
+  currentWorkspace,
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const menuItems = [
-    { id: "upload",       step: "1", label: "Upload RFP",        icon: FileText  },
-    { id: "requirements", step: "2", label: "Requirements",      icon: CheckCircle },
-    { id: "compliance",   step: "3", label: "Compliance Check",  icon: ShieldAlert },
-    { id: "draft",        step: "4", label: "AI Draft",          icon: Cpu       },
-    { id: "review",       step: "5", label: "Reviewer",          icon: ClipboardCheck },
-    { id: "score",        step: "6", label: "Win Score",         icon: Award     },
+    { id: "home", label: "Home", icon: Home },
+    { id: "history", label: "History", icon: History },
+    { id: "settings", label: "Settings", icon: Settings },
   ];
 
+  const openView = (id) => {
+    setActiveTab?.(id);
+    setMenuOpen(false);
+  };
+
   return (
-    <nav className="w-full bg-[#0d0d16] border-b border-slate-800/80 sticky top-0 z-50 shadow-lg" id="bid-engine-nav">
-      {/* Main nav bar row */}
-      <div className="px-6 lg:px-8 h-16 flex items-center justify-between max-w-7xl mx-auto w-full">
-        <div className="flex items-center space-x-8">
-          <div className="flex-shrink-0 flex items-center space-x-2 text-indigo-400">
-            <Cpu className="h-8 w-8 animate-pulse text-indigo-500" />
-            <span className="font-sans font-extrabold text-xl tracking-tight text-white">
-              BidEngine<span className="text-indigo-500">.AI</span>
+    <nav className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-xl shadow-sm" id="bid-engine-nav">
+      <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+        <button
+          type="button"
+          onClick={() => openView("home")}
+          className="group flex items-center gap-3 rounded-xl px-2 py-1.5 transition hover:bg-slate-100"
+          aria-label="Go to BidEngine home"
+        >
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-600/20 transition group-hover:scale-105">
+            <Sparkles className="h-5 w-5" />
+          </div>
+          <div className="text-left">
+            <div className="text-lg font-black tracking-tight text-slate-950">
+              BidEngine<span className="text-blue-600">.AI</span>
+            </div>
+            <div className="hidden text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 sm:block">
+              Procurement Copilot
+            </div>
+          </div>
+        </button>
+
+        <div className="hidden min-w-0 flex-1 justify-center px-8 lg:flex">
+          <div className="flex max-w-xl items-center gap-3 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-600">
+            <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.12)]" />
+            <span className="truncate">
+              {currentWorkspace?.title || "No active workspace"}
+            </span>
+            <span className="rounded-full bg-white px-2 py-0.5 text-xs font-bold text-blue-600 ring-1 ring-slate-200">
+              {currentWorkspace?.status || "ready"}
             </span>
           </div>
+        </div>
 
-          {/* Desktop Navigation Links */}
-          <div className="hidden lg:flex items-center space-x-2">
-            {menuItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeTab === item.id;
-              return (
+        <div className="flex items-center gap-3">
+          <div className="hidden rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 md:block">
+            {userEmail || "Authenticated user"}
+          </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((value) => !value)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:text-blue-600 hover:shadow-md"
+              aria-label="Open navigation menu"
+            >
+              {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
+
+            {menuOpen && (
+              <div className="absolute right-0 mt-3 w-64 origin-top-right overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-900/10 animate-[fadeIn_160ms_ease-out]">
+                {menuItems.map((item) => {
+                  const Icon = item.icon;
+                  const active = activeTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => openView(item.id)}
+                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold transition ${
+                        active
+                          ? "bg-blue-50 text-blue-700"
+                          : "text-slate-700 hover:bg-slate-50 hover:text-blue-700"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+                <div className="my-2 h-px bg-slate-100" />
                 <button
-                  key={item.id}
-                  onClick={() => setActiveTab && setActiveTab(item.id)}
-                  className={`flex flex-col items-center px-3 py-2 rounded-md text-xs font-medium transition-all duration-200 outline-none cursor-pointer min-w-[90px] ${
-                    isActive
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20"
-                      : "text-slate-400 hover:text-white hover:bg-slate-800"
-                  }`}
+                  type="button"
+                  onClick={onSignOut}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-rose-600 transition hover:bg-rose-50"
                 >
-                  <div className="flex items-center gap-1.5">
-                    <Icon className="h-3.5 w-3.5" />
-                    <span className="font-bold">{item.label}</span>
-                  </div>
-                  <span className={`text-[9px] font-mono mt-0.5 ${isActive ? "text-indigo-200" : "text-slate-600"}`}>
-                    STEP {item.step}
-                  </span>
+                  <LogOut className="h-4 w-4" />
+                  <span>Sign out</span>
                 </button>
-              );
-            })}
+              </div>
+            )}
           </div>
         </div>
-
-        {/* User Section / Access controls */}
-        <div className="hidden lg:flex items-center space-x-4">
-          {userEmail && (
-            <div className="text-slate-400 text-xs font-mono">
-              Active Bidding: <span className="text-indigo-400">{userEmail}</span>
-            </div>
-          )}
-          {onSignOut && (
-            <button
-              onClick={onSignOut}
-              className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-850 hover:bg-red-955 hover:text-red-300 rounded text-xs text-slate-400 border border-slate-855 transition cursor-pointer"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              <span>Exit Workspace</span>
-            </button>
-          )}
-        </div>
-
-        {/* Mobile menu button */}
-        <div className="lg:hidden flex items-center">
-          <button
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="inline-flex items-center justify-center p-2 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 focus:outline-none"
-          >
-            {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-          </button>
-        </div>
       </div>
-
-      {/* Mobile Menu */}
-      {mobileMenuOpen && (
-        <div className="lg:hidden bg-slate-900 border-b border-slate-800 px-2 pt-2 pb-3 space-y-1 sm:px-3">
-          {menuItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => {
-                  setActiveTab && setActiveTab(item.id);
-                  setMobileMenuOpen(false);
-                }}
-                className={`flex items-center space-x-3 w-full px-3 py-3 rounded-md text-base font-medium transition-all ${
-                  isActive
-                    ? "bg-indigo-600 text-white"
-                    : "text-slate-400 hover:text-white hover:bg-slate-800"
-                }`}
-              >
-                <Icon className="h-5 w-5" />
-                <span>Step {item.step}: {item.label}</span>
-              </button>
-            );
-          })}
-
-          {userEmail && (
-            <div className="px-3 py-2 text-slate-500 font-mono text-xs border-t border-slate-800">
-              User: <span className="text-indigo-400">{userEmail}</span>
-            </div>
-          )}
-          {onSignOut && (
-            <button
-              onClick={onSignOut}
-              className="flex items-center space-x-2 w-full px-3 py-3 text-red-400 hover:bg-slate-800 rounded-md text-base"
-            >
-              <LogOut className="h-5 w-5" />
-              <span>Exit Workspace</span>
-            </button>
-          )}
-        </div>
-      )}
     </nav>
   );
 }

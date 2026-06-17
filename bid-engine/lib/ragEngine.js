@@ -1,15 +1,14 @@
 import { Document } from "@langchain/core/documents";
 import { RunnableSequence } from "@langchain/core/runnables";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
-import { OpenAIEmbeddings } from "@langchain/openai";
 import { SupabaseVectorStore } from "@langchain/community/vectorstores/supabase";
-import { analyzeWithGroq } from "./groqClient.js";
 import { getSupabaseAdminOrNull } from "./supabaseClient.js";
 import { inferRequirementMetadata } from "./intelligence.js";
 
 const VECTOR_TABLE = "evidence_documents";
 const VECTOR_QUERY_NAME = "match_evidence_documents";
-const EMBEDDING_MODEL = "text-embedding-3-small";
+const EMBEDDING_MODEL = "local-hashing-1536";
+const EMBEDDING_DIMENSIONS = 1536;
 const DEFAULT_TOP_K = 6;
 const CHUNK_SIZE = 900;
 const CHUNK_OVERLAP = 120;
@@ -52,12 +51,33 @@ const normalizeVector = (vector) => {
   return vector.map((value) => value / norm);
 };
 
-export const embedText = (text, dimensions = 96) => {
+const signedHash = (token) => (hashToken(`sign:${token}`) % 2 === 0 ? 1 : -1);
+
+const addTokenFeature = (vector, feature, weight = 1) => {
+  const bucket = hashToken(feature) % vector.length;
+  vector[bucket] += signedHash(feature) * weight;
+};
+
+export const embedText = (text, dimensions = EMBEDDING_DIMENSIONS) => {
   const vector = new Array(dimensions).fill(0);
-  tokenize(text).forEach((token) => {
-    const bucket = hashToken(token) % dimensions;
-    vector[bucket] += 1;
+  const tokens = tokenize(text);
+
+  tokens.forEach((token) => {
+    addTokenFeature(vector, `tok:${token}`, 1);
+    if (token.length > 5) {
+      addTokenFeature(vector, `prefix:${token.slice(0, 5)}`, 0.35);
+      addTokenFeature(vector, `suffix:${token.slice(-5)}`, 0.35);
+    }
   });
+
+  for (let index = 0; index < tokens.length - 1; index += 1) {
+    addTokenFeature(vector, `bigram:${tokens[index]} ${tokens[index + 1]}`, 0.65);
+  }
+
+  for (let index = 0; index < tokens.length - 2; index += 1) {
+    addTokenFeature(vector, `trigram:${tokens[index]} ${tokens[index + 1]} ${tokens[index + 2]}`, 0.35);
+  }
+
   return normalizeVector(vector);
 };
 
@@ -85,16 +105,21 @@ const getSupabaseClient = () => {
   return client;
 };
 
-const getEmbeddings = () => {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is required for real embeddings.");
+class LocalHashingEmbeddings {
+  constructor({ dimensions = EMBEDDING_DIMENSIONS } = {}) {
+    this.dimensions = dimensions;
   }
 
-  return new OpenAIEmbeddings({
-    apiKey: process.env.OPENAI_API_KEY,
-    model: EMBEDDING_MODEL,
-  });
-};
+  async embedDocuments(texts = []) {
+    return texts.map((text) => embedText(text, this.dimensions));
+  }
+
+  async embedQuery(text = "") {
+    return embedText(text, this.dimensions);
+  }
+}
+
+const getEmbeddings = () => new LocalHashingEmbeddings();
 
 const getCorpusCount = async (supabase) => {
   const { count, error } = await supabase
@@ -107,6 +132,126 @@ const getCorpusCount = async (supabase) => {
   }
 
   return Number(count || 0);
+};
+
+const getTableCount = async (supabase, tableName) => {
+  const { count, error } = await supabase
+    .from(tableName)
+    .select("id", { count: "exact", head: true });
+
+  if (error) {
+    return { count: 0, error };
+  }
+
+  return { count: Number(count || 0), error: null };
+};
+
+const testVectorInsertAndSearch = async (supabase) => {
+  const sourceId = `RAG_HEALTH_${Date.now()}`;
+  const embedding = embedText("RAG health check vector insert and search");
+  let insertedId = null;
+
+  try {
+    const { data, error } = await supabase
+      .from(VECTOR_TABLE)
+      .insert({
+        source_type: "rag_health_check",
+        source_id: sourceId,
+        chunk_index: 0,
+        content: "RAG health check vector insert and search",
+        metadata: { source_type: "rag_health_check", health_check: true },
+        embedding,
+      })
+      .select("id")
+      .single();
+
+    if (error) {
+      return { vector_insert: "failed", vector_search: "failed", reason: error.message };
+    }
+
+    insertedId = data?.id || null;
+
+    const { data: searchRows, error: searchError } = await supabase.rpc(VECTOR_QUERY_NAME, {
+      query_embedding: embedding,
+      match_count: 1,
+      filter_metadata: { health_check: true },
+    });
+
+    if (searchError) {
+      return { vector_insert: "working", vector_search: "failed", reason: searchError.message };
+    }
+
+    return {
+      vector_insert: "working",
+      vector_search: Array.isArray(searchRows) && searchRows.length > 0 ? "working" : "failed",
+      reason: Array.isArray(searchRows) && searchRows.length > 0 ? "" : "Health vector insert succeeded but vector search returned no rows.",
+    };
+  } finally {
+    if (insertedId) {
+      await supabase.from(VECTOR_TABLE).delete().eq("id", insertedId);
+    }
+  }
+};
+
+export const runRagHealthCheck = async () => {
+  const supabase = getSupabaseClient();
+  const health = {
+    vector_enabled: false,
+    evidence_table_exists: false,
+    capability_rows: 0,
+    evidence_rows: 0,
+    embedding_column_exists: false,
+    embedding_generation: "failed",
+    vector_insert: "failed",
+    vector_search: "failed",
+    embedding_provider: EMBEDDING_MODEL,
+    rag_status: "FAILED",
+    reason: "",
+  };
+
+  const evidence = await getTableCount(supabase, VECTOR_TABLE);
+  health.evidence_table_exists = !evidence.error;
+  health.evidence_rows = evidence.count;
+  if (evidence.error) {
+    health.reason = `evidence_documents unavailable: ${evidence.error.message}`;
+    return health;
+  }
+
+  const capabilities = await getTableCount(supabase, "capability_library");
+  health.capability_rows = capabilities.count;
+  if (capabilities.error) {
+    health.reason = `capability_library unavailable: ${capabilities.error.message}`;
+    return health;
+  }
+
+  try {
+    const testEmbedding = await getEmbeddings().embedQuery("RAG health check");
+    health.embedding_generation = testEmbedding.length === EMBEDDING_DIMENSIONS ? "working" : "failed";
+    health.embedding_column_exists = testEmbedding.length === EMBEDDING_DIMENSIONS;
+  } catch (error) {
+    health.reason = `embedding generation failed: ${error.message}`;
+    return health;
+  }
+
+  const vectorTest = await testVectorInsertAndSearch(supabase);
+  health.vector_insert = vectorTest.vector_insert;
+  health.vector_search = vectorTest.vector_search;
+  health.vector_enabled = vectorTest.vector_insert === "working" && vectorTest.vector_search === "working";
+
+  if (!health.vector_enabled) {
+    health.reason = vectorTest.reason || "pgvector insert/search test failed.";
+    health.rag_status = "FAILED";
+  } else if (health.evidence_rows > 0 && health.capability_rows > 0) {
+    health.reason = "RAG corpus is seeded and vector search is working.";
+    health.rag_status = "ACTIVE";
+  } else {
+    health.reason = health.capability_rows === 0
+      ? "capability_library has no records to seed."
+      : "Vector stack works, but evidence_documents has no corpus rows yet.";
+    health.rag_status = "NOT_READY";
+  }
+
+  return health;
 };
 
 const inferCapabilityEvidenceTypes = (capability = {}) => {
@@ -290,11 +435,12 @@ export const syncCapabilityCorpus = async (capabilities = [], { force = false } 
       documents_chunked: documents.length,
       error: error.message,
     });
-    throw new Error(`Failed to generate OpenAI embeddings for RAG corpus: ${error.message}`);
+    throw new Error(`Failed to generate local embeddings for RAG corpus: ${error.message}`);
   }
 
   ragLog("embeddings_generated", {
     model: EMBEDDING_MODEL,
+    dimensions: EMBEDDING_DIMENSIONS,
     documents_chunked: documents.length,
     embeddings_generated: embeddings.length,
   });
@@ -415,6 +561,7 @@ Rules:
 - "Related but not proving the requirement" must be NO.
 - Only score YES when the evidence actually supports the requirement.`;
 
+  const { analyzeWithGroq } = await import("./groqClient.js");
   const result = await analyzeWithGroq(userPrompt, systemPrompt);
   const ranked = Array.isArray(result?.ranked_candidates) ? result.ranked_candidates : [];
   const rankedMap = new Map(ranked.map((item) => [String(item.id || ""), item]));
@@ -442,6 +589,8 @@ const buildRagUnavailableResponse = (requirementMeta, queryText, warning, detail
   reason: warning,
   source: "",
   evidence_items: [],
+  retrieved_chunks: [],
+  selected_evidence: "",
   source_references: [],
   matched_terms: [],
   requirement_category: requirementMeta.category,
@@ -470,6 +619,8 @@ const buildEvidenceResponse = (requirementMeta, best, ranked, queryText, syncSta
       reason: "No evidence passed the vector search and reranking thresholds.",
       source: "",
       evidence_items: [],
+      retrieved_chunks: ranked,
+      selected_evidence: "",
       source_references: [],
       matched_terms: [],
       requirement_category: requirementMeta.category,
@@ -514,6 +665,17 @@ const buildEvidenceResponse = (requirementMeta, best, ranked, queryText, syncSta
       certification_name: item.metadata?.certification_name || "",
       keywords: unique(tokenize(item.pageContent || item.content || "")).slice(0, 24),
     })),
+    retrieved_chunks: ranked.slice(0, 6).map((item) => ({
+      id: item.id,
+      source_reference: item.metadata?.source_id || item.metadata?.chunk_id || item.id || "EVIDENCE",
+      content: item.pageContent || item.content || "",
+      similarity: Number(item.similarity || 0),
+      rerank_score: Number(item.rerank_score || 0),
+      rerank_support: Boolean(item.rerank_support),
+      reason: item.rerank_reason || "",
+      metadata: item.metadata || {},
+    })),
+    selected_evidence: best.rerank_support ? `${sourceReference}: ${evidenceText.slice(0, 420)}` : "",
     source_references: ranked.slice(0, 3).map((item) => item.metadata?.source_id || item.metadata?.chunk_id || item.id || "EVIDENCE"),
     matched_terms: unique(tokenize(evidenceText)).slice(0, 12),
     requirement_category: requirementMeta.category,
@@ -534,7 +696,8 @@ export const buildCapabilityIndex = (capabilities = []) => capabilities.map((cap
   return {
     ...enriched,
     source_reference: capability.external_id || capability.id || capability.project_name || "CAPABILITY",
-    vector_ready: Boolean(process.env.OPENAI_API_KEY),
+    vector_ready: true,
+    embedding_model: EMBEDDING_MODEL,
   };
 });
 
@@ -563,15 +726,6 @@ export const retrieveCapabilityEvidence = async (requirement, capabilities = [],
   ].join(" ").trim();
 
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      const warning = "RAG disabled: OPENAI_API_KEY is missing, so embeddings cannot be generated.";
-      ragWarn("retrieval_blocked", { reason: warning });
-      return buildRagUnavailableResponse(requirementMeta, queryText, warning, {
-        capability_count: capabilities.length,
-        corpus_ready: false,
-      });
-    }
-
     const { vectorStore, syncStats } = await createVectorStore(capabilities, options);
     const retriever = vectorStore.asRetriever(DEFAULT_TOP_K);
     const retrievalChain = RunnableSequence.from([

@@ -1,6 +1,14 @@
 import { mapCriteriaToTaxonomy } from "../../bid-engine/lib/datasetAnalysis.js";
 import { EVALUATION_CRITERIA_TAXONOMY } from "../../bid-engine/lib/sampleData.js";
 import { runCrewStage } from "../../bid-engine/lib/crewBridge.js";
+import {
+  buildRequirementId,
+  extractSectionAwareRequirements,
+  flattenModelRequirements,
+  mergeRequirementCandidates,
+  toDbRequirementType,
+  validateRequirementCandidates,
+} from "../../bid-engine/lib/intelligence.js";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../_lib/requestAuth.js";
 import { getSupabaseAdminOrNull } from "../_lib/supabase.js";
 
@@ -281,12 +289,41 @@ export default async function handler(req, res) {
       }
     }
 
-    // Step 4: Build, filter, deduplicate, cap at 30
-    const rawRows = buildRequirementRows(extractedData, taxonomyMappings);
-    const finalRows = deduplicateRows(rawRows).slice(0, 30).map((row) => ({
-      workspace_id: workspaceId,
-      ...row,
+    // Step 4: Build, validate, deduplicate, cap at 80
+    const llmRequirements = flattenModelRequirements(extractedData);
+    const heuristicRequirements = extractSectionAwareRequirements(rawText);
+    const taxonomyRequirements = taxonomyMappings.map((item) => ({
+      requirement: item.source_text || item.criteria_name,
+      category: "Evaluation",
+      priority: item.weight_percentage ? "Important" : "Standard",
+      source_section: `Taxonomy: ${item.criteria_name}`,
+      source_page: null,
+      source_text: item.source_text || item.criteria_name,
+      needs_evidence: false,
+      expected_evidence_type: "Evaluation Criteria",
+    }));
+    const validation = validateRequirementCandidates([
+      ...llmRequirements,
+      ...heuristicRequirements,
+      ...taxonomyRequirements,
+    ]);
+    const finalRequirements = mergeRequirementCandidates(
+      llmRequirements,
+      heuristicRequirements,
+      taxonomyRequirements
+    ).map((requirement, index) => ({
+      id: buildRequirementId(index),
+      ...requirement,
+      requirement_type: toDbRequirementType(requirement.category),
       compliance_status: "partial",
+    })).slice(0, 80);
+
+    const finalRows = finalRequirements.map((requirement) => ({
+      workspace_id: workspaceId,
+      requirement_text: requirement.requirement,
+      requirement_type: requirement.requirement_type,
+      compliance_status: "partial",
+      extracted_value: String(requirement.source_text || requirement.requirement).slice(0, 600),
     }));
 
     // Step 5: Save to Supabase
@@ -306,7 +343,19 @@ export default async function handler(req, res) {
       success: true,
       workspaceId,
       extracted: extractedData,
-      requirements: insertedRequirements,
+      requirements: finalRequirements,
+      inserted_requirements: insertedRequirements,
+      diagnostics: {
+        total_requirements: finalRequirements.length,
+        extraction_debug: {
+          raw_text_length: rawText.length,
+          sections_detected: new Set(finalRequirements.map((item) => item.source_section).filter(Boolean)).size,
+          requirements_before_validation: validation.diagnostics.requirements_before_validation,
+          requirements_after_validation: finalRequirements.length,
+          rejected_bad_chunks: validation.diagnostics.rejected_bad_chunks,
+          rejected_examples: validation.diagnostics.rejected_examples,
+        },
+      },
       count: insertedRequirements.length,
     });
   } catch (err) {

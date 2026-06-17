@@ -27,12 +27,22 @@ import {
   ShieldAlert,
   Loader,
   Edit,
-  ArrowRight
+  ArrowRight,
+  ArrowLeft,
+  Home,
+  History,
+  Settings,
+  User,
+  Building2,
+  Gauge,
+  Activity,
+  CircleCheck,
+  Clock
 } from "lucide-react";
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState("upload");
+  const [activeTab, setActiveTab] = useState("home");
   const [currentUser, setCurrentUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
@@ -65,6 +75,14 @@ export default function DashboardPage() {
   const [isPredicting, setIsPredicting] = useState(false);
   const [isProcessingPipeline, setIsProcessingPipeline] = useState(false);
   const [alert, setAlert] = useState(null);
+  const [profileSettings, setProfileSettings] = useState({
+    name: "",
+    emailDisplay: "",
+    company: "",
+    role: "",
+    industry: "",
+    theme: "Bright SaaS",
+  });
 
   const getAuthHeaders = (headers = {}) => {
     const token = typeof window !== "undefined" ? localStorage.getItem("bid_engine_token") : "";
@@ -109,6 +127,27 @@ export default function DashboardPage() {
     checkAuth();
   }, [router]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = localStorage.getItem("bid_engine_profile_settings");
+    if (saved) {
+      try {
+        setProfileSettings((current) => ({ ...current, ...JSON.parse(saved) }));
+      } catch {
+        // Ignore malformed local settings.
+      }
+    }
+  }, []);
+
+  const saveProfileSettings = () => {
+    localStorage.setItem("bid_engine_profile_settings", JSON.stringify({
+      ...profileSettings,
+      emailDisplay: profileSettings.emailDisplay || currentUser?.email || "",
+    }));
+    setAlert({ type: "success", text: "Settings saved for this browser profile." });
+    setTimeout(() => setAlert(null), 2200);
+  };
+
   const handleSignOut = () => {
     localStorage.removeItem("bid_engine_token");
     localStorage.removeItem("bid_engine_user_email");
@@ -121,6 +160,11 @@ export default function DashboardPage() {
     id: workspace.id,
     title: workspace.title,
     status: workspace.status || "analyzing",
+    fileName: workspace.file_name || "",
+    createdAt: workspace.created_at || "",
+    updatedAt: workspace.updated_at || workspace.created_at || "",
+    winScore: workspace.win_score ?? null,
+    decision: workspace.decision || null,
   });
 
   const inferWorkspaceTitle = (text) => {
@@ -873,11 +917,52 @@ export default function DashboardPage() {
   // Calculate compliance statistics
   const compliancePassCount = requirements.filter(req => req.status === "pass").length;
   const complianceScorePercent = Math.round((compliancePassCount / requirements.length) * 100) || 75;
+  const selectedWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId) || null;
+  const workflowTabs = ["upload", "requirements", "compliance", "draft", "review", "score"];
+  const workflowLabels = {
+    upload: "Upload",
+    requirements: "Requirements",
+    compliance: "Compliance",
+    draft: "Draft",
+    review: "Review",
+    score: "Win Score",
+  };
+  const currentWorkflowIndex = workflowTabs.indexOf(activeTab);
+  const isWorkflowTab = currentWorkflowIndex >= 0;
+  const dashboardStats = [
+    { label: "Workspaces", value: workspaces.length, icon: Building2, tone: "text-blue-600 bg-blue-50" },
+    { label: "Requirements", value: requirements.length, icon: Layers, tone: "text-violet-600 bg-violet-50" },
+    { label: "Evidence Matches", value: Object.keys(matchMatrix).length, icon: Activity, tone: "text-emerald-600 bg-emerald-50" },
+    { label: "Draft Sections", value: proposalDrafts.length, icon: FileText, tone: "text-amber-600 bg-amber-50" },
+  ];
+  const stepComplete = {
+    upload: Boolean(rfpText.trim()),
+    requirements: requirements.length > 0,
+    compliance: Object.keys(matchMatrix).length > 0,
+    draft: proposalDrafts.length > 0,
+    review: Boolean(reviewResult),
+    score: Boolean(ratingAnalysis),
+  };
+
+  const openWorkspace = (workspace, destination = "upload") => {
+    setSelectedWorkspaceId(workspace.id);
+    setActiveTab(destination);
+  };
+
+  const goBackInWorkflow = () => {
+    if (!isWorkflowTab || currentWorkflowIndex <= 0) {
+      setActiveTab("home");
+      return;
+    }
+    setActiveTab(workflowTabs[currentWorkflowIndex - 1]);
+  };
 
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <div className="text-white text-xl">Loading...</div>
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="rounded-2xl border border-slate-200 bg-white px-6 py-4 text-slate-700 shadow-sm">
+          Loading workspace...
+        </div>
       </div>
     );
   }
@@ -885,21 +970,22 @@ export default function DashboardPage() {
   if (!isAuthenticated) return null;
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-slate-100 flex flex-col" id="dashboard-system">
+    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col" id="dashboard-system">
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         userEmail={currentUser?.email || "Authenticated user"}
         onSignOut={handleSignOut}
+        currentWorkspace={selectedWorkspace}
       />
 
       <div className="flex-grow flex flex-col lg:flex-row max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 gap-6">
         
         {/* LEFT SIDEBAR: Workspace List */}
         <aside className="w-full lg:w-64 shrink-0 space-y-4">
-          <div className="bg-[#1a1a2e] p-4 rounded-xl border border-purple-950/40">
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
             <div className="flex justify-between items-center mb-3">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-purple-300 font-bold block">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-slate-500 font-bold block">
                 Workspaces
               </span>
               <button 
@@ -911,7 +997,7 @@ export default function DashboardPage() {
                     });
                   }
                 }}
-                className="p-1 bg-purple-900/30 border border-purple-900/60 hover:border-purple-500 rounded text-purple-300 transition"
+                className="p-1.5 bg-violet-50 border border-violet-100 hover:border-violet-300 rounded-lg text-violet-600 transition"
                 title="Create Workspace"
               >
                 <Plus className="h-3.5 w-3.5" />
@@ -925,19 +1011,19 @@ export default function DashboardPage() {
                   onClick={() => setSelectedWorkspaceId(ws.id)}
                   className={`w-full text-left p-2.5 rounded-lg text-xs transition border ${
                     selectedWorkspaceId === ws.id
-                      ? "bg-purple-950/30 text-purple-300 border-purple-800"
-                      : "bg-[#0a0a0f]/40 text-slate-400 border-transparent hover:bg-purple-950/10 hover:text-slate-200"
+                      ? "bg-violet-50 text-violet-700 border-violet-200"
+                      : "bg-slate-50 text-slate-600 border-transparent hover:bg-slate-100 hover:text-slate-900"
                   }`}
                 >
                   <div className="font-semibold truncate">{ws.title}</div>
-                  <div className="flex justify-between items-center text-[10px] text-slate-500 font-mono mt-1">
+                  <div className="flex justify-between items-center text-[10px] text-slate-400 font-mono mt-1">
                     <span>ID: {ws.id}</span>
-                    <span className="text-purple-400">{ws.status}</span>
+                    <span className="text-violet-500">{ws.status}</span>
                   </div>
                 </button>
               ))}
               {workspaces.length === 0 && (
-                <div className="text-xs text-slate-500 bg-[#0a0a0f]/40 border border-purple-950/10 rounded-lg p-3">
+                <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
                   {workspaceMode === "loading"
                     ? "Loading Supabase workspaces..."
                     : "No workspaces yet. Upload or load an RFP to create one."}
@@ -946,8 +1032,8 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="bg-[#1a1a2e] p-4 rounded-xl border border-purple-950/40 space-y-2 text-center text-xs text-slate-500">
-            <FolderLock className="h-5 w-5 text-purple-400/80 mx-auto" />
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2 text-center text-xs text-slate-500">
+            <FolderLock className="h-5 w-5 text-violet-500 mx-auto" />
             <p>
               {workspaceMode === "sample_mode"
                 ? "Sample mode: database unavailable."
@@ -959,9 +1045,234 @@ export default function DashboardPage() {
         {/* MAIN CONTENT AREA */}
         <main className="flex-grow space-y-6">
           {alert && (
-            <div className="p-4 rounded-xl flex items-start gap-3 text-sm bg-purple-950/30 text-purple-350 border border-purple-900 shadow-md animate-fade-in">
-              <AlertCircle className="h-5 w-5 text-purple-400 shrink-0 mt-0.5" />
+            <div className="p-4 rounded-2xl flex items-start gap-3 text-sm bg-white text-slate-700 border border-violet-100 shadow-sm animate-fade-in">
+              <AlertCircle className="h-5 w-5 text-violet-500 shrink-0 mt-0.5" />
               <div>{alert.text}</div>
+            </div>
+          )}
+
+          {activeTab === "home" && (
+            <div className="space-y-6">
+              <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                <div className="grid gap-6 p-6 md:grid-cols-[1.4fr_0.8fr] md:p-8">
+                  <div>
+                    <div className="inline-flex items-center gap-2 rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      Bright RFP intelligence workspace
+                    </div>
+                    <h1 className="mt-4 text-3xl font-black tracking-tight text-slate-950 md:text-4xl">
+                      Turn procurement documents into compliant bid actions.
+                    </h1>
+                    <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
+                      Upload an RFP, extract atomic requirements, seed the RAG corpus if needed, match evidence, draft answers, review risk, and calculate win score.
+                    </p>
+                    <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                      <button
+                        onClick={() => setActiveTab("upload")}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-violet-200 transition hover:bg-violet-500"
+                      >
+                        Start Compliance Check
+                        <ArrowRight className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => setActiveTab("history")}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+                      >
+                        View History
+                        <History className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-500">RAG Status</span>
+                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                        workspaceMode === "sample_mode" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"
+                      }`}>
+                        {workspaceMode === "sample_mode" ? "Needs DB" : "Live Supabase"}
+                      </span>
+                    </div>
+                    <div className="mt-5 space-y-3 text-sm text-slate-600">
+                      <div className="flex items-center justify-between rounded-xl bg-white p-3">
+                        <span>Selected workspace</span>
+                        <strong className="max-w-[11rem] truncate text-slate-900">{selectedWorkspace?.title || "None yet"}</strong>
+                      </div>
+                      <div className="flex items-center justify-between rounded-xl bg-white p-3">
+                        <span>Latest win score</span>
+                        <strong className="text-slate-900">{selectedWorkspace?.winScore ?? ratingAnalysis?.winProbability ?? "—"}</strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                {dashboardStats.map((stat) => {
+                  const Icon = stat.icon;
+                  return (
+                    <div key={stat.label} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <div className={`mb-4 inline-flex rounded-xl p-2 ${stat.tone}`}>
+                        <Icon className="h-5 w-5" />
+                      </div>
+                      <div className="text-2xl font-black text-slate-950">{stat.value}</div>
+                      <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">{stat.label}</div>
+                    </div>
+                  );
+                })}
+              </section>
+
+              <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="text-lg font-black text-slate-950">Recent Workspaces</h2>
+                  <button onClick={() => setActiveTab("history")} className="text-sm font-bold text-violet-600 hover:text-violet-500">
+                    See all
+                  </button>
+                </div>
+                <div className="grid gap-3">
+                  {workspaces.slice(0, 4).map((workspace) => (
+                    <button
+                      key={workspace.id}
+                      onClick={() => openWorkspace(workspace, "requirements")}
+                      className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-violet-200 hover:bg-violet-50/40 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div>
+                        <div className="font-bold text-slate-900">{workspace.title}</div>
+                        <div className="text-xs text-slate-500">{workspace.fileName || "RFP workspace"} · {workspace.status}</div>
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-slate-400" />
+                    </button>
+                  ))}
+                  {workspaces.length === 0 && (
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
+                      No history yet. Upload an RFP to create the first workspace.
+                    </div>
+                  )}
+                </div>
+              </section>
+            </div>
+          )}
+
+          {activeTab === "history" && (
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h1 className="text-2xl font-black text-slate-950">Workspace History</h1>
+                  <p className="text-sm text-slate-500">Loaded from the app workspace API, backed by Supabase when configured.</p>
+                </div>
+                <button onClick={() => setActiveTab("upload")} className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white hover:bg-violet-500">
+                  New RFP Upload
+                </button>
+              </div>
+              <div className="grid gap-4">
+                {workspaces.map((workspace) => (
+                  <div key={workspace.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <h3 className="font-black text-slate-950">{workspace.title}</h3>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {workspace.fileName || "No file name"} · Updated {workspace.updatedAt ? new Date(workspace.updatedAt).toLocaleString() : "recently"}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200">{workspace.status}</span>
+                        {workspace.winScore !== null && (
+                          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">Win {workspace.winScore}%</span>
+                        )}
+                        {workspace.decision && (
+                          <span className="rounded-full bg-violet-50 px-3 py-1 text-xs font-bold text-violet-700">{workspace.decision}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button onClick={() => openWorkspace(workspace, "upload")} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100">
+                        Open
+                      </button>
+                      <button onClick={() => openWorkspace(workspace, "requirements")} className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700 hover:bg-violet-100">
+                        Continue Analysis
+                      </button>
+                      <button onClick={() => openWorkspace(workspace, "score")} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100">
+                        View Score
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {workspaces.length === 0 && (
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                    No saved workspaces found.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "settings" && (
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="mb-6">
+                <h1 className="text-2xl font-black text-slate-950">Settings</h1>
+                <p className="text-sm text-slate-500">Profile preferences are stored locally in this browser; auth remains unchanged.</p>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                {[
+                  ["name", "Name", User],
+                  ["emailDisplay", "Display email", Settings],
+                  ["company", "Company", Building2],
+                  ["role", "Role", Gauge],
+                  ["industry", "Industry", Activity],
+                ].map(([field, label, Icon]) => (
+                  <label key={field} className="block">
+                    <span className="mb-1.5 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+                      <Icon className="h-3.5 w-3.5" />
+                      {label}
+                    </span>
+                    <input
+                      value={profileSettings[field] || (field === "emailDisplay" ? currentUser?.email || "" : "")}
+                      onChange={(event) => setProfileSettings((current) => ({ ...current, [field]: event.target.value }))}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-100"
+                    />
+                  </label>
+                ))}
+              </div>
+              <button onClick={saveProfileSettings} className="mt-6 rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-violet-200 hover:bg-violet-500">
+                Save Settings
+              </button>
+            </div>
+          )}
+
+          {isWorkflowTab && (
+            <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={goBackInWorkflow}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    Back
+                  </button>
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wider text-slate-400">Workflow</div>
+                    <div className="font-black text-slate-950">{workflowLabels[activeTab]}</div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {workflowTabs.map((tab, index) => (
+                    <button
+                      key={tab}
+                      onClick={() => setActiveTab(tab)}
+                      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                        activeTab === tab
+                          ? "bg-violet-600 text-white shadow-sm"
+                          : stepComplete[tab]
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                      }`}
+                    >
+                      {stepComplete[tab] ? <CircleCheck className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
+                      {index + 1}. {workflowLabels[tab]}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
 
@@ -973,17 +1284,17 @@ export default function DashboardPage() {
                 isProcessing={isAnalyzing}
                 initialText={rfpText}
               />
-              <div className="bg-[#1a1a2e] border border-purple-950/40 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4 shadow-xl">
+              <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4 shadow-sm">
                 <div>
-                  <h3 className="text-sm font-bold text-white">One-click pipeline</h3>
-                  <p className="text-xs text-slate-400 mt-1">
+                  <h3 className="text-sm font-bold text-slate-950">One-click pipeline</h3>
+                  <p className="text-xs text-slate-500 mt-1">
                     Run analysis, retrieval, drafting, review, and win scoring in one pass.
                   </p>
                 </div>
                 <button
                   onClick={handleRunFullPipeline}
                   disabled={isProcessingPipeline || !rfpText.trim()}
-                  className="px-5 py-3 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white font-semibold text-sm transition flex items-center justify-center gap-2 cursor-pointer"
+                  className="px-5 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:bg-slate-300 text-white font-semibold text-sm transition flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-violet-200"
                 >
                   {isProcessingPipeline ? (
                     <>
@@ -1003,54 +1314,54 @@ export default function DashboardPage() {
 
           {/* TAB 2: Table showing extracted Requirements */}
           {activeTab === "requirements" && (
-            <div className="bg-[#1a1a2e] p-6 rounded-xl border border-purple-950/40 shadow-xl space-y-4">
+            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
               <div>
-                <h2 className="text-lg font-bold text-white flex items-center gap-1.5">
-                  <Layers className="text-purple-400 h-5 w-5" />
+                <h2 className="text-lg font-bold text-slate-950 flex items-center gap-1.5">
+                  <Layers className="text-violet-500 h-5 w-5" />
                   Extracted Requirements Matrix
                 </h2>
-                <p className="text-slate-400 text-xs mt-1">
+                <p className="text-slate-500 text-xs mt-1">
                   Table view of parsed operational requirements, highlighted by criticality and procurement weights.
                 </p>
               </div>
 
-              <div className="overflow-x-auto border border-purple-950/20 rounded-lg">
+              <div className="overflow-x-auto border border-slate-200 rounded-2xl">
                 <table className="w-full text-left border-collapse text-xs">
-                  <thead className="bg-[#0a0a0f] text-slate-400 font-mono tracking-wider uppercase text-[10px]">
+                  <thead className="bg-slate-50 text-slate-500 font-mono tracking-wider uppercase text-[10px]">
                     <tr>
-                      <th className="p-3.5 border-b border-purple-950/30">ID</th>
-                      <th className="p-3.5 border-b border-purple-950/30">Requirement Clause Description</th>
-                      <th className="p-3.5 border-b border-purple-950/30">Priority Type</th>
-                      <th className="p-3.5 border-b border-purple-950/30">Evaluation Status</th>
+                      <th className="p-3.5 border-b border-slate-200">ID</th>
+                      <th className="p-3.5 border-b border-slate-200">Requirement Clause Description</th>
+                      <th className="p-3.5 border-b border-slate-200">Priority Type</th>
+                      <th className="p-3.5 border-b border-slate-200">Evaluation Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {requirements.map((req, i) => (
-                      <tr key={i} className="hover:bg-[#0a0a0f]/40 transition duration-150">
-                        <td className="p-3.5 border-b border-purple-950/20 font-mono font-bold text-purple-400">
+                      <tr key={i} className="hover:bg-violet-50/40 transition duration-150">
+                        <td className="p-3.5 border-b border-slate-100 font-mono font-bold text-violet-600">
                           {req.id}
                         </td>
-                        <td className="p-3.5 border-b border-purple-950/20 text-slate-200 max-w-sm">
-                          <p className="font-semibold text-white">{req.title}</p>
-                          <p className="text-slate-400 text-[11px] mt-0.5 truncate">{req.description}</p>
+                        <td className="p-3.5 border-b border-slate-100 text-slate-700 max-w-sm">
+                          <p className="font-semibold text-slate-950">{req.title}</p>
+                          <p className="text-slate-500 text-[11px] mt-0.5 truncate">{req.description}</p>
                         </td>
-                        <td className="p-3.5 border-b border-purple-950/20">
+                        <td className="p-3.5 border-b border-slate-100">
                           <div className="flex flex-wrap gap-1.5">
-                            <span className="px-2.5 py-1 text-[10px] bg-blue-950/40 text-blue-300 font-mono border border-blue-900/30 rounded-full">
+                            <span className="px-2.5 py-1 text-[10px] bg-blue-50 text-blue-700 font-mono border border-blue-100 rounded-full">
                               {req.category || "Mandatory"}
                             </span>
-                            <span className="px-2.5 py-1 text-[10px] bg-purple-950/40 text-purple-300 font-mono border border-purple-900/30 rounded-full">
+                            <span className="px-2.5 py-1 text-[10px] bg-violet-50 text-violet-700 font-mono border border-violet-100 rounded-full">
                               {req.priority || "Standard"}
                             </span>
                           </div>
                         </td>
-                        <td className="p-3.5 border-b border-purple-950/20">
+                        <td className="p-3.5 border-b border-slate-100">
                           <span className={`inline-flex items-center gap-1 font-mono text-[10px] px-2 py-0.5 rounded ${
                             req.status === "pass" 
-                              ? "bg-emerald-950/40 text-emerald-400" 
+                              ? "bg-emerald-50 text-emerald-700" 
                               : req.status === "partial" 
-                              ? "bg-amber-950/40 text-amber-400" 
-                              : "bg-rose-950/40 text-rose-450"
+                              ? "bg-amber-50 text-amber-700" 
+                              : "bg-rose-50 text-rose-700"
                           }`}>
                             {req.status?.toUpperCase()}
                           </span>
@@ -1065,21 +1376,21 @@ export default function DashboardPage() {
 
           {/* TAB 3: Compliance Checklist */}
           {activeTab === "compliance" && (
-            <div className="bg-[#1a1a2e] p-6 rounded-xl border border-purple-950/40 shadow-xl space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-purple-950/25 pb-4">
+            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
                 <div>
-                  <h2 className="text-lg font-bold text-white flex items-center gap-1.5">
-                    <CheckSquare className="text-purple-400 h-5 w-5" />
+                  <h2 className="text-lg font-bold text-slate-950 flex items-center gap-1.5">
+                    <CheckSquare className="text-violet-500 h-5 w-5" />
                     Gap Compliance Checklist
                   </h2>
-                  <p className="text-slate-400 text-xs mt-1">
+                  <p className="text-slate-500 text-xs mt-1">
                     Validate bid constraints against organizational project evidence to isolate vulnerabilities.
                   </p>
                 </div>
 
-                <div className="bg-[#0a0a0f] p-3 rounded-xl border border-purple-950/20 text-center sm:text-right">
+                <div className="bg-violet-50 p-3 rounded-xl border border-violet-100 text-center sm:text-right">
                   <span className="text-xs text-slate-500 font-mono block">Overall Compliance:</span>
-                  <span className="text-xl font-extrabold text-purple-400 font-mono">{complianceScorePercent}% Satisfied</span>
+                  <span className="text-xl font-extrabold text-violet-700 font-mono">{complianceScorePercent}% Satisfied</span>
                 </div>
               </div>
 
@@ -1087,14 +1398,14 @@ export default function DashboardPage() {
                 {requirements.map((req, idx) => {
                   const match = matchMatrix[req.id] || { status: "fail", reasoning: "No capability evidence found." };
                   return (
-                    <div key={idx} className="bg-[#0a0a0f]/80 p-4 rounded-xl border border-purple-950/15 flex items-start gap-3.5">
+                    <div key={idx} className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex items-start gap-3.5">
                       <div className="mt-0.5 shrink-0">
                         {match.status === "pass" ? (
-                          <div className="p-1 bg-emerald-950 text-emerald-400 border border-emerald-900 rounded-full">
+                            <div className="p-1 bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-full">
                             <Check className="h-4 w-4" />
                           </div>
                         ) : (
-                          <div className="p-1 bg-rose-950 text-rose-400 border border-rose-900 rounded-full">
+                            <div className="p-1 bg-rose-100 text-rose-700 border border-rose-200 rounded-full">
                             <X className="h-4 w-4" />
                           </div>
                         )}
@@ -1102,24 +1413,24 @@ export default function DashboardPage() {
 
                       <div className="space-y-1 flex-grow">
                         <div className="flex justify-between items-start gap-2">
-                          <h4 className="font-bold text-white text-sm">{req.title}</h4>
+                          <h4 className="font-bold text-slate-950 text-sm">{req.title}</h4>
                           <span className={`text-[10px] font-mono px-2 py-0.5 rounded border uppercase ${
                             match.status === "pass" 
-                              ? "bg-emerald-950/30 text-emerald-400 border-emerald-900/30" 
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
                               : match.status === "partial" 
-                              ? "bg-amber-950/20 text-amber-400 border-amber-900/20" 
-                              : "bg-rose-950/20 text-rose-400 border-rose-905/20"
+                              ? "bg-amber-50 text-amber-700 border-amber-200" 
+                              : "bg-rose-50 text-rose-700 border-rose-200"
                           }`}>
                             {match.status === "pass" ? "Pass Badge" : match.status === "partial" ? "Partial Match" : "Fail Badge"}
                           </span>
                         </div>
-                        <p className="text-xs text-slate-400 leading-relaxed">{req.description}</p>
-                        <div className="text-[11px] bg-[#1a1a2e]/40 p-2 rounded-lg border border-purple-950/10 text-purple-300 font-mono mt-1.5 space-y-1">
+                        <p className="text-xs text-slate-600 leading-relaxed">{req.description}</p>
+                        <div className="text-[11px] bg-white p-2 rounded-lg border border-slate-200 text-violet-700 font-mono mt-1.5 space-y-1">
                           <strong>Evidence Proof:</strong> {match.evidence || "No immediate project evidence match."}
                           {Array.isArray(match.evidenceItems) && match.evidenceItems.length > 0 && (
                             <div className="space-y-1 pt-1">
                               {match.evidenceItems.slice(0, 2).map((item) => (
-                                <div key={item.source_reference} className="text-slate-300">
+                                <div key={item.source_reference} className="text-slate-600">
                                   {item.source_reference} · {item.project_name} · {item.match_score}%
                                 </div>
                               ))}
@@ -1138,7 +1449,7 @@ export default function DashboardPage() {
                 <button
                   onClick={executeMatching}
                   disabled={isMatching}
-                  className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white font-semibold text-xs rounded-lg transition flex items-center gap-2 cursor-pointer"
+                  className="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 disabled:bg-slate-300 text-white font-semibold text-xs rounded-xl transition flex items-center gap-2 cursor-pointer shadow-lg shadow-violet-200"
                 >
                   {isMatching ? <Loader className="h-4 w-4 animate-spin" /> : null}
                   <span>Recalculate Compliance Matrices</span>
