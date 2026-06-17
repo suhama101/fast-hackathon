@@ -1,128 +1,195 @@
 "use client";
 
 import React, { useState } from "react";
-import { LogOut, Menu, X, Cpu, Home, Settings } from "lucide-react";
+import { LogOut, Menu, X, Cpu, Check, Lock } from "lucide-react";
 
-export default function Navbar({ activeTab, setActiveTab, userEmail, onSignOut }) {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+/**
+ * Navbar with embedded workflow progress tracker.
+ *
+ * Props:
+ *  activeTab        – current active tab id
+ *  setActiveTab     – setter to change the active tab
+ *  workflowSteps    – array of { id, label, complete } from parent
+ *  canAccessStep    – fn(index) => boolean from parent
+ *  userEmail        – authenticated user email
+ *  onSignOut        – sign-out handler
+ */
+export default function Navbar({
+  activeTab,
+  setActiveTab,
+  workflowSteps = [],
+  canAccessStep,
+  userEmail,
+  onSignOut,
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
 
-  const menuItems = [
-    { id: "upload", label: "Home", icon: Home },
-    { id: "requirements", label: "Current RFP", icon: Cpu },
-    { id: "settings", label: "Settings", icon: Settings },
-  ];
+  const handleStepClick = (step, index) => {
+    if (!canAccessStep || canAccessStep(index)) {
+      setActiveTab && setActiveTab(step.id);
+    }
+  };
 
   return (
-    <nav className="w-full bg-[#0d0d16] border-b border-slate-800/80 sticky top-0 z-50 shadow-lg" id="bid-engine-nav">
-      <div className="px-6 lg:px-8 h-16 flex items-center justify-between max-w-7xl mx-auto w-full">
+    <nav
+      className="w-full bg-[#0d0d16] border-b border-slate-800/80 sticky top-0 z-50 shadow-lg"
+      id="bid-engine-nav"
+    >
+      {/* ── Top bar ── */}
+      <div className="px-4 lg:px-8 h-14 flex items-center justify-between max-w-7xl mx-auto w-full gap-4">
+        {/* Logo */}
         <button
           onClick={() => setActiveTab && setActiveTab("upload")}
-          className="flex-shrink-0 flex items-center space-x-2 text-indigo-400 hover:text-indigo-300 transition"
+          className="flex-shrink-0 flex items-center gap-2 hover:opacity-80 transition"
         >
-            <Cpu className="h-8 w-8 animate-pulse text-indigo-500" />
-            <span className="font-sans font-extrabold text-xl tracking-tight text-white">
-              BidEngine<span className="text-indigo-500">.AI</span>
-            </span>
+          <Cpu className="h-6 w-6 text-indigo-500 animate-pulse" />
+          <span className="font-extrabold text-lg tracking-tight text-white hidden sm:inline">
+            BidEngine<span className="text-indigo-500">.AI</span>
+          </span>
         </button>
 
-        <div className="hidden lg:flex items-center space-x-4">
+        {/* ── Workflow step tracker (desktop) ── */}
+        {workflowSteps.length > 0 && (
+          <div className="hidden md:flex items-center gap-1 flex-1 justify-center">
+            {workflowSteps.map((step, index) => {
+              const isActive = activeTab === step.id;
+              const isComplete = step.complete;
+              const isLocked = canAccessStep ? !canAccessStep(index) : false;
+
+              return (
+                <React.Fragment key={step.id}>
+                  {/* Connector line */}
+                  {index > 0 && (
+                    <div
+                      className={`h-px w-5 lg:w-8 flex-shrink-0 ${
+                        workflowSteps[index - 1]?.complete
+                          ? "bg-emerald-700"
+                          : "bg-slate-700"
+                      }`}
+                    />
+                  )}
+
+                  {/* Step pill */}
+                  <button
+                    onClick={() => handleStepClick(step, index)}
+                    disabled={isLocked}
+                    title={isLocked ? `Complete previous steps to unlock ${step.label}` : step.label}
+                    className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all select-none ${
+                      isActive
+                        ? "bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-900/40"
+                        : isComplete
+                        ? "bg-emerald-950/40 border-emerald-800/60 text-emerald-300 hover:border-emerald-500 cursor-pointer"
+                        : isLocked
+                        ? "bg-slate-900/40 border-slate-800 text-slate-600 cursor-not-allowed"
+                        : "bg-slate-900/60 border-slate-700 text-slate-400 hover:border-indigo-600 hover:text-slate-200 cursor-pointer"
+                    }`}
+                  >
+                    <span className={`w-4 h-4 flex items-center justify-center rounded-full text-[10px] font-bold flex-shrink-0 ${
+                      isActive
+                        ? "bg-white/20"
+                        : isComplete
+                        ? "bg-emerald-700/40"
+                        : isLocked
+                        ? "bg-slate-800"
+                        : "bg-slate-800"
+                    }`}>
+                      {isComplete ? (
+                        <Check className="h-2.5 w-2.5" />
+                      ) : isLocked ? (
+                        <Lock className="h-2.5 w-2.5" />
+                      ) : (
+                        index + 1
+                      )}
+                    </span>
+                    <span className="hidden lg:inline whitespace-nowrap">{step.label}</span>
+                  </button>
+                </React.Fragment>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── Right side: user + menu ── */}
+        <div className="flex items-center gap-3 flex-shrink-0">
           {userEmail && (
-            <div className="text-slate-400 text-xs font-mono">
-              Active Bidding: <span className="text-indigo-400">{userEmail}</span>
-            </div>
+            <span className="hidden lg:block text-[11px] font-mono text-slate-500 max-w-[160px] truncate">
+              {userEmail}
+            </span>
           )}
+
           <div className="relative">
             <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-800"
+              onClick={() => setMenuOpen((o) => !o)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800 transition"
+              aria-label="Open menu"
             >
-              {mobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
-              Menu
+              {menuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
             </button>
-            {mobileMenuOpen && (
-              <div className="absolute right-0 mt-2 w-52 rounded-xl border border-slate-800 bg-slate-950 p-2 shadow-2xl">
-                {menuItems.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = activeTab === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => {
-                        setActiveTab && setActiveTab(item.id);
-                        setMobileMenuOpen(false);
-                      }}
-                      className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm transition ${
-                        isActive ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                      }`}
-                    >
-                      <Icon className="h-4 w-4" />
-                      {item.label}
-                    </button>
-                  );
-                })}
+
+            {menuOpen && (
+              <div className="absolute right-0 mt-2 w-48 rounded-xl border border-slate-800 bg-[#0d0d16] shadow-2xl p-2 z-50">
+                {userEmail && (
+                  <div className="px-3 py-2 text-[11px] font-mono text-slate-500 border-b border-slate-800 mb-1 truncate">
+                    {userEmail}
+                  </div>
+                )}
                 {onSignOut && (
                   <button
-                    onClick={onSignOut}
-                    className="mt-1 flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-red-400 hover:bg-red-950/30"
+                    onClick={() => { setMenuOpen(false); onSignOut(); }}
+                    className="flex items-center gap-2 w-full px-3 py-2.5 rounded-lg text-sm text-red-400 hover:bg-red-950/30 transition"
                   >
                     <LogOut className="h-4 w-4" />
-                    Exit Workspace
+                    Sign Out
                   </button>
                 )}
               </div>
             )}
           </div>
         </div>
-
-        <div className="lg:hidden flex items-center">
-          <button
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="inline-flex items-center justify-center p-2 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 focus:outline-none"
-          >
-            {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-          </button>
-        </div>
       </div>
 
-      {/* Mobile Menu */}
-      {mobileMenuOpen && (
-        <div className="lg:hidden bg-slate-900 border-b border-slate-800 px-2 pt-2 pb-3 space-y-1 sm:px-3">
-          {menuItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => {
-                  setActiveTab && setActiveTab(item.id);
-                  setMobileMenuOpen(false);
-                }}
-                className={`flex items-center space-x-3 w-full px-3 py-3 rounded-md text-base font-medium transition-all ${
-                  isActive
-                    ? "bg-indigo-600 text-white"
-                    : "text-slate-400 hover:text-white hover:bg-slate-800"
-                }`}
-              >
-                <Icon className="h-5 w-5" />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
+      {/* ── Mobile workflow steps (below top bar) ── */}
+      {workflowSteps.length > 0 && (
+        <div className="md:hidden border-t border-slate-800/60 px-4 py-2 overflow-x-auto">
+          <div className="flex items-center gap-1 min-w-max">
+            {workflowSteps.map((step, index) => {
+              const isActive = activeTab === step.id;
+              const isComplete = step.complete;
+              const isLocked = canAccessStep ? !canAccessStep(index) : false;
 
-          {userEmail && (
-            <div className="px-3 py-2 text-slate-500 font-mono text-xs border-t border-slate-800">
-              User: <span className="text-indigo-400">{userEmail}</span>
-            </div>
-          )}
-          {onSignOut && (
-            <button
-              onClick={onSignOut}
-              className="flex items-center space-x-2 w-full px-3 py-3 text-red-400 hover:bg-slate-800 rounded-md text-base"
-            >
-              <LogOut className="h-5 w-5" />
-              <span>Exit Workspace</span>
-            </button>
-          )}
+              return (
+                <React.Fragment key={step.id}>
+                  {index > 0 && (
+                    <div className={`h-px w-4 flex-shrink-0 ${
+                      workflowSteps[index - 1]?.complete ? "bg-emerald-700" : "bg-slate-700"
+                    }`} />
+                  )}
+                  <button
+                    onClick={() => handleStepClick(step, index)}
+                    disabled={isLocked}
+                    className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border whitespace-nowrap transition ${
+                      isActive
+                        ? "bg-indigo-600 border-indigo-500 text-white"
+                        : isComplete
+                        ? "bg-emerald-950/40 border-emerald-800/60 text-emerald-300"
+                        : isLocked
+                        ? "bg-slate-900/40 border-slate-800 text-slate-600 cursor-not-allowed"
+                        : "bg-slate-900/60 border-slate-700 text-slate-400"
+                    }`}
+                  >
+                    {isComplete ? (
+                      <Check className="h-2.5 w-2.5 flex-shrink-0" />
+                    ) : isLocked ? (
+                      <Lock className="h-2.5 w-2.5 flex-shrink-0" />
+                    ) : (
+                      <span className="text-[10px] font-mono">{index + 1}</span>
+                    )}
+                    {step.label}
+                  </button>
+                </React.Fragment>
+              );
+            })}
+          </div>
         </div>
       )}
     </nav>

@@ -67,6 +67,18 @@ export default function DashboardPage() {
   const [isPredicting, setIsPredicting] = useState(false);
   const [isProcessingPipeline, setIsProcessingPipeline] = useState(false);
   const [alert, setAlert] = useState(null);
+  const [toastVisible, setToastVisible] = useState(false);
+  const toastTimerRef = React.useRef(null);
+
+  const showToast = React.useCallback((type, text) => {
+    setAlert({ type, text });
+    setToastVisible(true);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => {
+      setToastVisible(false);
+      setTimeout(() => setAlert(null), 350);
+    }, 4000);
+  }, []);
 
   const getAuthHeaders = (headers = {}) => {
     const token = typeof window !== "undefined" ? localStorage.getItem("bid_engine_token") : "";
@@ -981,11 +993,13 @@ export default function DashboardPage() {
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
+        workflowSteps={workflowSteps}
+        canAccessStep={canAccessStep}
         userEmail={currentUser?.email || "Authenticated user"}
         onSignOut={handleSignOut}
       />
 
-      <div className="flex-grow flex flex-col lg:flex-row max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 gap-6">
+      <div className="flex-grow flex flex-col lg:flex-row max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 gap-6">
         
         {/* LEFT SIDEBAR: Workspace List */}
         <aside className="w-full lg:w-64 shrink-0 space-y-4">
@@ -1049,11 +1063,37 @@ export default function DashboardPage() {
         </aside>
 
         {/* MAIN CONTENT AREA */}
-        <main className="flex-grow space-y-6">
+        <main className="flex-grow space-y-4">
+          {/* Floating toast — bottom-right, auto-dismisses */}
           {alert && (
-            <div className="p-4 rounded-xl flex items-start gap-3 text-sm bg-purple-950/30 text-purple-350 border border-purple-900 shadow-md animate-fade-in">
-              <AlertCircle className="h-5 w-5 text-purple-400 shrink-0 mt-0.5" />
-              <div>{alert.text}</div>
+            <div
+              style={{
+                position: "fixed",
+                bottom: "20px",
+                right: "20px",
+                zIndex: 9999,
+                maxWidth: "400px",
+                transition: "opacity 0.3s ease, transform 0.3s ease",
+                opacity: toastVisible ? 1 : 0,
+                transform: toastVisible ? "translateY(0)" : "translateY(10px)",
+                pointerEvents: toastVisible ? "auto" : "none",
+              }}
+            >
+              <div
+                className={`flex items-start gap-3 px-4 py-3 rounded-xl border shadow-2xl text-sm font-medium backdrop-blur-sm ${
+                  alert.type === "error"
+                    ? "bg-rose-950/95 border-rose-700 text-rose-200"
+                    : "bg-[#1a1a2e]/95 border-purple-700 text-purple-100"
+                }`}
+              >
+                <AlertCircle className={`h-4 w-4 shrink-0 mt-0.5 ${alert.type === "error" ? "text-rose-400" : "text-purple-400"}`} />
+                <span className="flex-1">{alert.text}</span>
+                <button
+                  onClick={() => { setToastVisible(false); setTimeout(() => setAlert(null), 300); }}
+                  className="text-slate-400 hover:text-white shrink-0 ml-1 leading-none text-base"
+                  aria-label="Dismiss"
+                >✕</button>
+              </div>
             </div>
           )}
 
