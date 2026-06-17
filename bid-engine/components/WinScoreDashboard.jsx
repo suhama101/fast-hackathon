@@ -8,6 +8,7 @@ export default function WinScoreDashboard({
   ratingAnalysis = null,
   onPredictScore,
   isPredicting,
+  isLoadingScore = false,
   requirements = [],
   runtimeDebug = null
 }) {
@@ -22,6 +23,10 @@ export default function WinScoreDashboard({
   const capabilityMatch = analysis?.benchmarks?.capabilityMatch ?? 0;
   const complianceScore = analysis?.benchmarks?.complianceScore ?? 0;
   const riskScore = analysis?.benchmarks?.riskBuffer ?? 0;
+  const budgetAlignment = analysis?.benchmarks?.budgetAlignment ?? analysis?.benchmarks?.commercialAlignment ?? null;
+  const complianceBlockers = requirements.filter((requirement) =>
+    ["fail", "no match"].includes(String(requirement.status || requirement.compliance_status || "").toLowerCase())
+  );
 
   return (
     <div className="bg-[#1a1a2e] p-6 rounded-xl border border-purple-950/40 shadow-xl space-y-6" id="win-score-panel">
@@ -55,7 +60,12 @@ export default function WinScoreDashboard({
         </button>
       </div>
 
-      {requirements.length === 0 ? (
+      {isLoadingScore ? (
+        <div className="text-center py-20 bg-[#0a0a0f] rounded-xl border border-purple-950/10">
+          <RefreshCw className="h-10 w-10 text-purple-400 mx-auto mb-2 animate-spin" />
+          <p className="text-slate-400 text-sm">Loading saved Win Score...</p>
+        </div>
+      ) : requirements.length === 0 ? (
         <div className="text-center py-20 bg-[#0a0a0f] rounded-xl border border-purple-950/10">
           <ShieldAlert className="h-10 w-10 text-slate-600 mx-auto mb-2" />
           <p className="text-slate-400 text-sm">No analysis history found for this workspace.</p>
@@ -174,7 +184,8 @@ export default function WinScoreDashboard({
                   { label: "Compliance Score", val: complianceScore, color: "bg-emerald-500", desc: "Mandatory clauses satisfied" },
                   { label: "Evidence Coverage", val: evidenceCoverage, color: "bg-blue-500", desc: "Requirements backed by evidence" },
                   { label: "Capability Match", val: capabilityMatch, color: "bg-purple-500", desc: "Capability fit against RFP needs" },
-                  { label: "Risk Score", val: riskScore, color: "bg-rose-500", desc: "Delivery and compliance risk buffer" }
+                  { label: "Risk Score", val: riskScore, color: "bg-rose-500", desc: "Delivery and compliance risk buffer" },
+                  ...(budgetAlignment !== null ? [{ label: "Budget / Commercial Alignment", val: budgetAlignment, color: "bg-amber-500", desc: "Commercial fit where available" }] : [])
                 ].map((item, idx) => (
                   <div key={idx} className="bg-[#1a1a2e]/40 p-3 rounded-lg border border-purple-950/10 space-y-2">
                     <div className="flex justify-between items-center text-xs">
@@ -240,7 +251,10 @@ export default function WinScoreDashboard({
                   {(analysis.mandatoryFailed || 0) > 0 && (
                     <li>{analysis.mandatoryFailed} mandatory requirement(s) failed compliance.</li>
                   )}
-                  {(analysis.no_matches || 0) === 0 && (analysis.mandatoryFailed || 0) === 0 && (
+                  {complianceBlockers.slice(0, 4).map((requirement) => (
+                    <li key={requirement.id || requirement.title}>{requirement.title || requirement.description || "Compliance blocker requires evidence."}</li>
+                  ))}
+                  {(analysis.no_matches || 0) === 0 && (analysis.mandatoryFailed || 0) === 0 && complianceBlockers.length === 0 && (
                     <li>No missing evidence blockers are currently flagged by the scoring model.</li>
                   )}
                 </ul>

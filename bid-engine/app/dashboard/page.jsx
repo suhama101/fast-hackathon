@@ -57,6 +57,7 @@ export default function DashboardPage() {
   const [reviewResult, setReviewResult] = useState(null);
 
   const [ratingAnalysis, setRatingAnalysis] = useState(null);
+  const [scoreWorkspaceId, setScoreWorkspaceId] = useState(null);
   const [runtimeDebug, setRuntimeDebug] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isMatching, setIsMatching] = useState(false);
@@ -65,6 +66,7 @@ export default function DashboardPage() {
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isPredicting, setIsPredicting] = useState(false);
+  const [isLoadingScore, setIsLoadingScore] = useState(false);
   const [isProcessingPipeline, setIsProcessingPipeline] = useState(false);
   const [alert, setAlert] = useState(null);
   const [toastVisible, setToastVisible] = useState(false);
@@ -253,6 +255,59 @@ export default function DashboardPage() {
     return data;
   };
 
+  const mapScoreAnalysis = (scoreRecord = {}, fallbackScores = {}) => {
+    const scoreComponents = scoreRecord.score_components || fallbackScores.score_components || {};
+    return {
+      winScore: scoreRecord.total_score,
+      benchmarks: {
+        budgetAlignment: scoreRecord.budget_alignment,
+        capabilityMatch: scoreRecord.capability_match,
+        complianceScore: scoreRecord.compliance_score,
+        riskBuffer: scoreRecord.risk_penalty_score ?? scoreRecord.evaluation_history_score ?? 0,
+        evidenceCoverage: scoreComponents.evidence_coverage || scoreRecord.capability_match || 0,
+        commercialAlignment: scoreRecord.commercial_history_score,
+      },
+      decision: scoreRecord.decision,
+      mandatoryTotal: scoreRecord.mandatory_total || fallbackScores.mandatory_total || 0,
+      mandatoryPassed: scoreRecord.mandatory_passed || fallbackScores.mandatory_passed || 0,
+      mandatoryPartial: scoreRecord.mandatory_partial || fallbackScores.mandatory_partial || 0,
+      mandatoryFailed: scoreRecord.mandatory_failed || fallbackScores.mandatory_failed || 0,
+      decisionReasoning: scoreRecord.decision_reasoning || fallbackScores.decision_reasoning || "",
+      remedialActions: [
+        `Historical sector win rate: ${scoreRecord.sector_win_rate || fallbackScores.sector_win_rate || 0}%.`,
+        `Similar experience score: ${scoreRecord.similar_experience_score || fallbackScores.similar_experience_score || 0}%.`,
+        `Mandatory compliance: ${scoreRecord.mandatory_passed || fallbackScores.mandatory_passed || 0} passed / ${scoreRecord.mandatory_total || fallbackScores.mandatory_total || 0} total mandatory requirements.`,
+      ],
+      score_components: scoreComponents,
+      strong_matches: scoreRecord.strong_matches || fallbackScores.strong_matches || 0,
+      partial_matches: scoreRecord.partial_matches || fallbackScores.partial_matches || 0,
+      no_matches: scoreRecord.no_matches || fallbackScores.no_matches || 0,
+    };
+  };
+
+  const loadSavedWinScore = async (workspaceId = selectedWorkspaceId) => {
+    if (!workspaceId) return null;
+    setIsLoadingScore(true);
+    try {
+      const data = await fetchJson(`/api/rfp/score?workspaceId=${encodeURIComponent(workspaceId)}`, {
+        headers: getAuthHeaders(),
+      });
+      if (data.record) {
+        setRatingAnalysis(mapScoreAnalysis(data.record));
+        setScoreWorkspaceId(workspaceId);
+        return data.record;
+      }
+      setRatingAnalysis(null);
+      setScoreWorkspaceId(workspaceId);
+      return null;
+    } catch (err) {
+      console.warn("Saved win score load failed:", err);
+      return null;
+    } finally {
+      setIsLoadingScore(false);
+    }
+  };
+
   const loadDrafts = async (workspaceId = selectedWorkspaceId) => {
     if (!workspaceId) return;
     const response = await fetch(`/api/rfp/draft?workspaceId=${encodeURIComponent(workspaceId)}`, {
@@ -272,6 +327,12 @@ export default function DashboardPage() {
       });
     }
   }, [selectedWorkspaceId, activeTab]);
+
+  useEffect(() => {
+    if (selectedWorkspaceId && activeTab === "score" && scoreWorkspaceId !== selectedWorkspaceId) {
+      loadSavedWinScore(selectedWorkspaceId);
+    }
+  }, [selectedWorkspaceId, activeTab, scoreWorkspaceId]);
 
   // Handle draft revisions
   const handleUpdateDraft = async (status = "edited", customContent = null) => {
@@ -540,30 +601,8 @@ export default function DashboardPage() {
       if (scoreData.record || scoreData.scores) {
         const scoreRecord = scoreData.record || scoreData.scores;
         const scoreComponents = scoreRecord.score_components || scoreData.scores?.score_components || {};
-        setRatingAnalysis({
-          winScore: scoreRecord.total_score,
-          benchmarks: {
-            budgetAlignment: scoreRecord.budget_alignment,
-            capabilityMatch: scoreRecord.capability_match,
-            complianceScore: scoreRecord.compliance_score,
-            riskBuffer: scoreRecord.evaluation_history_score || 75,
-          },
-          decision: scoreRecord.decision,
-          mandatoryTotal: scoreRecord.mandatory_total || 0,
-          mandatoryPassed: scoreRecord.mandatory_passed || 0,
-          mandatoryPartial: scoreRecord.mandatory_partial || 0,
-          mandatoryFailed: scoreRecord.mandatory_failed || 0,
-          decisionReasoning: scoreRecord.decision_reasoning || scoreData.scores?.decision_reasoning || "",
-          remedialActions: [
-            `Historical sector win rate: ${scoreRecord.sector_win_rate || scoreData.scores?.sector_win_rate || 0}%.`,
-            `Similar experience score: ${scoreRecord.similar_experience_score || scoreData.scores?.similar_experience_score || 0}%.`,
-            `Mandatory compliance: ${scoreRecord.mandatory_passed || 0} passed / ${scoreRecord.mandatory_total || 0} total mandatory requirements.`,
-          ],
-          score_components: scoreComponents,
-          strong_matches: scoreRecord.strong_matches || scoreData.scores?.strong_matches || 0,
-          partial_matches: scoreRecord.partial_matches || scoreData.scores?.partial_matches || 0,
-          no_matches: scoreRecord.no_matches || scoreData.scores?.no_matches || 0,
-        });
+        setRatingAnalysis(mapScoreAnalysis(scoreRecord, scoreData.scores || {}));
+        setScoreWorkspaceId(workspace.id);
         setRuntimeDebug((current) => ({
           ...(current || {}),
           scoreComponents,
@@ -633,6 +672,7 @@ export default function DashboardPage() {
     setAlert(null);
     setReviewResult(null);
     setRatingAnalysis(null);
+    setScoreWorkspaceId(null);
     setMatchMatrix({});
 
     try {
@@ -836,32 +876,8 @@ export default function DashboardPage() {
 
       if (data.record || data.scores) {
         const scoreRecord = data.record || data.scores;
-        const scoreComponents = scoreRecord.score_components || data.scores?.score_components || {};
-        setRatingAnalysis({
-          winScore: scoreRecord.total_score,
-          benchmarks: {
-            budgetAlignment: scoreRecord.budget_alignment,
-            capabilityMatch: scoreRecord.capability_match,
-            complianceScore: scoreRecord.compliance_score,
-            riskBuffer: scoreRecord.evaluation_history_score || 75,
-            evidenceCoverage: scoreComponents.evidence_coverage || scoreRecord.capability_match || 0,
-          },
-          decision: scoreRecord.decision,
-          mandatoryTotal: scoreRecord.mandatory_total || 0,
-          mandatoryPassed: scoreRecord.mandatory_passed || 0,
-          mandatoryPartial: scoreRecord.mandatory_partial || 0,
-          mandatoryFailed: scoreRecord.mandatory_failed || 0,
-          decisionReasoning: scoreRecord.decision_reasoning || data.scores?.decision_reasoning || "",
-          remedialActions: [
-            `Historical sector win rate: ${scoreRecord.sector_win_rate || data.scores?.sector_win_rate || 0}%.`,
-            `Similar experience score: ${scoreRecord.similar_experience_score || data.scores?.similar_experience_score || 0}%.`,
-            `Mandatory compliance: ${scoreRecord.mandatory_passed || 0} passed / ${scoreRecord.mandatory_total || 0} total mandatory requirements.`
-          ],
-          score_components: scoreComponents,
-          strong_matches: scoreRecord.strong_matches || data.scores?.strong_matches || 0,
-          partial_matches: scoreRecord.partial_matches || data.scores?.partial_matches || 0,
-          no_matches: scoreRecord.no_matches || data.scores?.no_matches || 0,
-        });
+        setRatingAnalysis(mapScoreAnalysis(scoreRecord, data.scores || {}));
+        setScoreWorkspaceId(selectedWorkspaceId);
       }
       setAlert({
         type: "success",
@@ -886,6 +902,7 @@ export default function DashboardPage() {
             "Highlight horizontal scaling protection schemas in PDF response drafts."
           ]
         });
+        setScoreWorkspaceId(selectedWorkspaceId);
         setAlert({ type: "success", text: "Hurdle modeling fit mapped!" });
         setActiveTab("score");
       }, 800);
@@ -935,6 +952,7 @@ export default function DashboardPage() {
     setEditedDraftValue("");
     setReviewResult(null);
     setRatingAnalysis(null);
+    setScoreWorkspaceId(null);
     setRuntimeDebug(null);
     setAlert(null);
     setActiveTab("upload");
@@ -1529,6 +1547,7 @@ export default function DashboardPage() {
               ratingAnalysis={ratingAnalysis}
               onPredictScore={executePredictScore}
               isPredicting={isPredicting}
+              isLoadingScore={isLoadingScore}
               requirements={requirements}
               runtimeDebug={runtimeDebug}
             />

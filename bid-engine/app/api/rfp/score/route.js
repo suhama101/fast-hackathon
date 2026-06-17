@@ -15,6 +15,44 @@ const normalizeRequirement = (req, index = 0) => ({
   extracted_value: req.extracted_value || "",
 });
 
+export async function GET(request) {
+  try {
+    const auth = await requireAuthenticatedUser(request);
+    if (auth.errorResponse) return auth.errorResponse;
+
+    const { supabase } = auth;
+    const { searchParams } = new URL(request.url);
+    const workspaceId = searchParams.get("workspaceId");
+
+    if (!isUuid(workspaceId)) {
+      return NextResponse.json({ success: false, error: "A valid workspaceId UUID is required." }, { status: 400 });
+    }
+
+    const ownership = await requireWorkspaceOwner(request, workspaceId);
+    if (ownership.errorResponse) return ownership.errorResponse;
+
+    const { data: record, error } = await supabase
+      .from("win_scores")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    return NextResponse.json({
+      success: true,
+      workspaceId,
+      record: record || null,
+    });
+  } catch (err) {
+    console.error("Error loading saved win score:", err);
+    return NextResponse.json(
+      { success: false, error: "Failed to load saved win score: " + err.message },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(request) {
   try {
     const { workspaceId, requirements: clientRequirements = [], rawText = "" } = await request.json();
