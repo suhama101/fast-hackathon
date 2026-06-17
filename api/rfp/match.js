@@ -1,5 +1,6 @@
-import { matchRequirementToCapabilities } from "../../bid-engine/lib/datasetAnalysis.js";
 import { CAPABILITY_LIBRARY } from "../../bid-engine/lib/sampleData.js";
+import { buildCapabilityIndex, retrieveCapabilityEvidence } from "../../bid-engine/lib/ragEngine.js";
+import { inferRequirementMetadata } from "../../bid-engine/lib/intelligence.js";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../_lib/requestAuth.js";
 import { getSupabaseAdminOrNull } from "../_lib/supabase.js";
 
@@ -112,18 +113,35 @@ export default async function handler(req, res) {
         .slice(0, 10),
     };
 
-    const matches = requirements.map((requirement, index) => {
+    const capabilityIndex = buildCapabilityIndex(capabilities);
+
+    const matches = [];
+    for (const [index, requirement] of requirements.entries()) {
       const normalized = normalizeRequirement(requirement, index);
-      const match = matchRequirementToCapabilities(normalized, capabilities, { entities: entityContext });
-      return {
+      const requirementMeta = inferRequirementMetadata(
+        normalized.requirement_text,
+        normalized.source_section || "",
+        normalized.requirement_text
+      );
+      const evidence = await retrieveCapabilityEvidence(
+        { ...normalized, category: requirementMeta.category },
+        capabilityIndex,
+        { topK: 3, entities: entityContext }
+      );
+      matches.push({
         requirement_id: normalized.id,
         requirement_text: normalized.requirement_text,
-        compliance_status: match.compliance_status,
-        confidence_score: match.confidence,
-        evidence: match.evidence,
-        reasoning: match.reasoning,
-      };
-    });
+        compliance_status: evidence.compliance_status,
+        confidence_score: evidence.confidence_score,
+        evidence: evidence.evidence,
+        reasoning: evidence.reason,
+        match_status: evidence.match_status,
+        match_score: evidence.match_score,
+        evidence_items: evidence.evidence_items || [],
+        source_references: evidence.source_references || [],
+        matched_terms: evidence.matched_terms || [],
+      });
+    }
 
     if (workspaceId && isUuid(workspaceId)) {
       const updateResults = await Promise.all(matches.map((match) =>
@@ -143,6 +161,19 @@ export default async function handler(req, res) {
       if (updateError) {
         throw new Error(`Failed to save compliance match results: ${updateError.message}`);
       }
+
+      await workspaceDb.from("ai_decision_trace").insert(
+        matches.map((match) => ({
+          workspace_id: workspaceId,
+          requirement_id: match.requirement_id,
+          requirement_text: match.requirement_text,
+          evidence_document_id: match.traceability?.approved_evidence?.id || null,
+          evidence_text: match.evidence,
+          rerank_score: match.match_score,
+          compliance_status: match.compliance_status,
+          trace: match.traceability || {},
+        }))
+      );
     }
 
     const requirementsWithMatches = requirements.map((requirement, index) => {
@@ -154,6 +185,8 @@ export default async function handler(req, res) {
         matched_evidence: match?.evidence,
         match_confidence: match?.confidence_score,
         match_reasoning: match?.reasoning,
+        evidence_items: match?.evidence_items || [],
+        match_status: match?.match_status || "No Match",
       };
     });
 

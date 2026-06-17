@@ -24,6 +24,7 @@ const SECTION_MARKERS = [
 ];
 
 const PAGE_MARKER_REGEX = /\[\[page\s+(\d+)\]\]|\bpage\s+(\d+)\b/i;
+const PAGE_MARKER_GLOBAL_REGEX = /\[\[page\s+\d+\]\]|\bpage\s+\d+\b/gi;
 
 const BOILERPLATE_PHRASES = [
   "this rfp is only an invitation",
@@ -52,6 +53,7 @@ const COMPLETE_CLAUSE_ENDINGS = [
 ];
 
 const SPLIT_CLAUSE_PATTERN = /(?:\s*;\s*|\.\s+|\s+(?:and|or)\s+(?=(?:provide|support|monitor|manage|maintain|report|deliver|implement|deploy|ensure|conduct|prepare|submit|include|respond|review|train|recover|restore|backup|document|configure|secure|operate|transition|staff|preserve|protect|guarantee))|,\s+(?=(?:provide|support|monitor|manage|maintain|report|deliver|implement|deploy|ensure|conduct|prepare|submit|include|respond|review|train|recover|restore|backup|document|configure|secure|operate|transition|staff|preserve|protect|guarantee)))/i;
+const SPLIT_HEADLINE_CLAUSE_PATTERN = /\s+(?=(?:the|this|each|all|any|bidder|bidders|vendor|vendors|consultant|consultants|contractor|contractors|team|proposal|proposals)\b[^.]{0,180}\b(?:must|shall|required|required to|should|need to|provide|submit|include|attach|demonstrate|comply|deliver|ensure|maintain|register|disclose|declare|support|recover|restore|backup|report|present|complete|respond)\b)/i;
 
 const FRAGMENT_ENDINGS = [
   /to the$/i,
@@ -222,33 +224,116 @@ const findSectionName = (line) => {
 
 const sentenceSplit = (text) =>
   cleanText(text)
-    .replace(/[•·]/g, "\n")
+    .replace(PAGE_MARKER_GLOBAL_REGEX, "\n")
+    .replace(/[\u2022\u00b7]/g, "\n")
     .split(/\n+|(?<=[.!?])\s+/)
     .map((line) => cleanText(line))
     .filter(Boolean);
 
+const normalizeRequirementCandidate = (text) =>
+  cleanText(text)
+    .replace(PAGE_MARKER_GLOBAL_REGEX, " ")
+    .replace(/^[\-\u2022*\d.\)\(]+\s*/, "")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/([“"'\(\[])\s+/g, "$1")
+    .replace(/\s+([”"'`\)\]])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const trimLeadingClauseNoise = (text) => {
+  const normalized = cleanText(text).trim();
+  if (!normalized) return "";
+
+  const actionIndex = firstActionVerbIndex(normalized);
+  if (actionIndex > 20 && actionIndex < 120) {
+    const prefix = normalized.slice(0, actionIndex);
+    if (/[,:;]\s*$/.test(prefix) || prefix.length < 45) {
+      return normalized.slice(actionIndex).trim();
+    }
+  }
+
+  return normalized;
+};
+
+const firstActionVerbIndex = (text) => {
+  const lower = cleanText(text).toLowerCase();
+  const verbs = [
+    "must",
+    "shall",
+    "required to",
+    "should",
+    "need to",
+    "provide",
+    "submit",
+    "include",
+    "attach",
+    "demonstrate",
+    "comply",
+    "deliver",
+    "ensure",
+    "maintain",
+    "register",
+    "disclose",
+    "declare",
+    "recover",
+    "restore",
+    "backup",
+    "report",
+    "present",
+    "complete",
+    "respond",
+  ];
+  const positions = verbs.map((verb) => lower.indexOf(verb)).filter((index) => index >= 0);
+  return positions.length ? Math.min(...positions) : -1;
+};
+
+const titleCaseChunkCount = (text) =>
+  (cleanText(text).match(/\b[A-Z][A-Za-z0-9/&()\-]*(?:\s+[A-Z][A-Za-z0-9/&()\-]*){1,4}\b/g) || []).length;
+
+const isNoisyCompositeRequirement = (text) => {
+  const normalized = normalizeRequirementCandidate(text);
+  const tokenCount = normalized.split(/\s+/).filter(Boolean).length;
+  if (!normalized) return true;
+  if (normalized.length > 320) return true;
+  if (normalized.includes("[[PAGE")) return true;
+  const actionIndex = firstActionVerbIndex(normalized);
+  if (tokenCount >= 18 && actionIndex > 80) return true;
+  if (tokenCount >= 24 && titleCaseChunkCount(normalized) >= 4 && actionIndex > 0) return true;
+  if (tokenCount >= 28 && !/[.!?;]/.test(normalized) && titleCaseChunkCount(normalized) >= 3) return true;
+  return false;
+};
+
 const splitAtomicClauses = (text) =>
   sentenceSplit(text).flatMap((sentence) => {
-    const trimmed = cleanText(sentence).replace(/^[\-\u2022*\d.\)\(]+\s*/, "");
+    const trimmed = trimLeadingClauseNoise(normalizeRequirementCandidate(sentence));
     if (!trimmed) return [];
     const segments = trimmed
       .split(SPLIT_CLAUSE_PATTERN)
-      .map((part) => cleanText(part))
+      .flatMap((part) => (part.length > 160 ? part.split(/,\s+/) : [part]))
+      .flatMap((part) =>
+        part.split(/,\s+(?=(?:the|this|each|all|any|bidder|bidders|vendor|vendors|consultant|consultants|contractor|contractors|team|proposal|proposals|document|documents|deliverable|deliverables|questions|responses|prices|payment|contract|project|assignment|services|scope|requirements)\b)/i)
+      )
+      .flatMap((part) => part.split(SPLIT_HEADLINE_CLAUSE_PATTERN))
+      .map((part) => trimLeadingClauseNoise(normalizeRequirementCandidate(part)))
       .filter(Boolean);
     return segments.length > 1 ? segments : [trimmed];
   });
 
 const likelyRequirement = (line) => {
-  if (line.length < 12 || line.length > 260) return false;
-  if (BOILERPLATE_PHRASES.some((phrase) => line.toLowerCase().includes(phrase))) return false;
-  if (COMPLETE_CLAUSE_ENDINGS.some((pattern) => pattern.test(line))) return false;
-  if (FRAGMENT_ENDINGS.some((pattern) => pattern.test(line.trim()))) return false;
+  const normalized = trimLeadingClauseNoise(normalizeRequirementCandidate(line));
+  if (normalized.length < 12 || normalized.length > 260) return false;
+  if (BOILERPLATE_PHRASES.some((phrase) => normalized.toLowerCase().includes(phrase))) return false;
+  if (COMPLETE_CLAUSE_ENDINGS.some((pattern) => pattern.test(normalized))) return false;
+  if (FRAGMENT_ENDINGS.some((pattern) => pattern.test(normalized.trim()))) return false;
+  if (isNoisyCompositeRequirement(normalized)) return false;
 
-  const tokenCount = cleanText(line).split(/\s+/).filter(Boolean).length;
-  const hasActionVerb = /\b(must|shall|required|required to|should|need to|may not|must not|not exceed|at least|no later than|within|provide|submit|include|attach|demonstrate|validate|undertake|deliver|comply|disclose|declare|initial|sign|register|maintain|participate|respond|quote|present|complete|attend|travel)\b/i.test(line);
-  const hasSpecificDetail = /\b(\d+%|\d+\s*(days?|weeks?|months?)|ntn|pkr|usd|email|address|proposal validity|page limit|hard copy|soft copy|blacklist|blacklisting|conflict of interest|related party|anti[-\s]?fraud|anti[-\s]?corruption|deliverable|evaluation criteria|scoring|deadline|closing date|submission)\b/i.test(line);
+  const tokenCount = normalized.split(/\s+/).filter(Boolean).length;
+  const hasActionVerb = /\b(must|shall|required|required to|should|need to|may not|must not|not exceed|at least|no later than|within|provide|submit|include|attach|demonstrate|validate|undertake|deliver|comply|disclose|declare|initial|sign|register|maintain|participate|respond|quote|present|complete|attend|travel|report|recover|restore|backup|ensure)\b/i.test(normalized);
+  const hasSpecificDetail = /\b(\d+%|\d+\s*(days?|weeks?|months?)|ntn|pkr|usd|email|address|proposal validity|page limit|hard copy|soft copy|blacklist|blacklisting|conflict of interest|related party|anti[-\s]?fraud|anti[-\s]?corruption|deliverable|evaluation criteria|scoring|deadline|closing date|submission|reporting|staffing|recovery|continuity|backup|restore|failover|resilience|help desk|monitoring|sla|uptime|availability|incident response|cybersecurity|server|business continuity)\b/i.test(normalized);
+  const hasRequirementSubject = /\b(bidder|bidders|vendor|vendors|consultant|consultants|contractor|contractors|firm|firms|company|proposal|technical proposal|financial proposal|document|documents|deliverable|deliverables|budget|invoice|team|member|members|applicant|applicants|consortium|joint venture|jv|schedule|response|report|work plan|methodology|payment|pricing|price|solution|service|services)\b/i.test(normalized);
 
-  if (/^[a-z]/.test(line.trim()) && !hasActionVerb && !hasSpecificDetail) return false;
+  if (/^[a-z]/.test(normalized.trim()) && !hasActionVerb && !hasSpecificDetail) return false;
+  if (!hasRequirementSubject && !/^(provide|submit|include|attach|ensure|comply|disclose|declare|prepare|maintain|respond|review|deliver|present)/i.test(normalized)) return false;
 
   return tokenCount >= 4 && (hasActionVerb || hasSpecificDetail);
 };
@@ -337,16 +422,18 @@ export function extractSectionAwareRequirements(rawText = "") {
 
   flushBuffer();
 
-  splitAtomicClauses(text).forEach((sentence) => {
-    if (likelyRequirement(sentence)) {
-      results.push(createRequirement({
-        line: sentence,
-        sectionName: "Global Text Scan",
-        pageNumber: null,
-        sourceText: sentence,
-      }));
-    }
-  });
+  if (results.length < 20) {
+    splitAtomicClauses(text).forEach((sentence) => {
+      if (likelyRequirement(sentence)) {
+        results.push(createRequirement({
+          line: sentence,
+          sectionName: "Global Text Scan",
+          pageNumber: null,
+          sourceText: sentence,
+        }));
+      }
+    });
+  }
 
   const keywordClauses = [
     ["related party", "Comply with related party disclosure requirements."],

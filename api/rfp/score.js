@@ -1,5 +1,6 @@
 import { calculateWinScore } from "../../bid-engine/lib/datasetAnalysis.js";
 import { CAPABILITY_LIBRARY, BID_HISTORY } from "../../bid-engine/lib/sampleData.js";
+import { runCrewStage } from "../../bid-engine/lib/crewBridge.js";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../_lib/requestAuth.js";
 import { getSupabaseAdminOrNull } from "../_lib/supabase.js";
 
@@ -127,6 +128,17 @@ export default async function handler(req, res) {
       rawText: rawText || workspaceRawText,
     });
 
+    let strategy = null;
+    try {
+      strategy = await runCrewStage("strategy", {
+        requirements,
+        score: scores,
+        workspace_title: workspaceId || "RFP Bid",
+      });
+    } catch (crewError) {
+      console.warn("CrewAI strategy fallback:", crewError.message);
+    }
+
     let record = null;
     if (workspaceId && isUuid(workspaceId)) {
       const { data: savedScore, error: dbError } = await workspaceDb
@@ -172,6 +184,7 @@ export default async function handler(req, res) {
         risk_penalty_score: scores.risk_penalty_score,
         decision: scores.decision,
       },
+      strategy: strategy && !strategy.error ? strategy : null,
       history_count: bidHistory.length,
       capability_count: capabilities.length,
     });

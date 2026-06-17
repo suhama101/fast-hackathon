@@ -85,20 +85,21 @@ export async function POST(request) {
 
     const capabilityIndex = buildCapabilityIndex(capabilities);
 
-    const matches = requirements.map((requirement, index) => {
+    const matches = [];
+    for (const [index, requirement] of requirements.entries()) {
       const normalized = normalizeRequirement(requirement, index);
       const requirementMeta = inferRequirementMetadata(
         normalized.requirement_text,
         normalized.source_section,
         normalized.source_text
       );
-      const evidence = retrieveCapabilityEvidence(
+      const evidence = await retrieveCapabilityEvidence(
         { ...normalized, category: requirementMeta.category },
         capabilityIndex,
         { topK: 3, entities: entityContext }
       );
 
-      return {
+      matches.push({
         requirement_id: normalized.id,
         requirement: normalized.requirement_text,
         requirement_text: normalized.requirement_text,
@@ -116,8 +117,8 @@ export async function POST(request) {
         evidence_items: evidence.evidence_items,
         source_references: evidence.source_references,
         matched_terms: evidence.matched_terms,
-      };
-    });
+      });
+    }
 
     if (workspaceId && isUuid(workspaceId)) {
       await Promise.all(matches.map((match) =>
@@ -133,6 +134,19 @@ export async function POST(request) {
           .eq("id", match.requirement_id)
           .eq("workspace_id", workspaceId)
       ));
+
+      await supabase.from("ai_decision_trace").insert(
+        matches.map((match) => ({
+          workspace_id: workspaceId,
+          requirement_id: match.requirement_id,
+          requirement_text: match.requirement_text,
+          evidence_document_id: match.traceability?.approved_evidence?.id || null,
+          evidence_text: match.evidence,
+          rerank_score: match.match_score,
+          compliance_status: match.compliance_status,
+          trace: match.traceability || {},
+        }))
+      );
     }
 
     const requirementsWithMatches = requirements.map((requirement, index) => {

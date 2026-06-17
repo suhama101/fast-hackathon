@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { analyzeWithGroq } from "../../../../lib/groqClient";
+import { runCrewStage } from "../../../../lib/crewBridge";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../../../../lib/requestAuth";
 
 const isUuid = (value) =>
@@ -146,7 +147,7 @@ export async function POST(request) {
       });
     }
 
-    // 3. Draft the proposal template using Groq
+    // 3. Draft the proposal template using CrewAI first, then Groq as a fallback
     const toneInstruction = tone ? `Use a "${tone}" tone throughout.` : "Use a professional, compliant tone.";
     const capabilityContext = capabilityInfo ? `\n\nADDITIONAL CAPABILITY CONTEXT FROM USER:\n${capabilityInfo}` : "";
     const systemPrompt = `You are an expert proposal writer. Write professional, compliant proposal responses. ${toneInstruction}`;
@@ -187,7 +188,23 @@ Return a JSON object containing a "drafts" array. Format of each element:
 
 Return ONLY valid JSON.`;
 
-    const aiResponse = await analyzeWithGroq(userPrompt, systemPrompt);
+    let crewResponse = null;
+    try {
+      crewResponse = await runCrewStage("draft", {
+        workspace_title: "RFP Proposal",
+        tone,
+        requirements,
+        approved_evidence: evidenceByRequirement,
+        draft_targets: draftTargets,
+      });
+    } catch (crewError) {
+      console.warn("CrewAI draft fallback:", crewError.message);
+    }
+
+    const aiResponse = crewResponse && !crewResponse.error
+      ? crewResponse
+      : await analyzeWithGroq(userPrompt, systemPrompt);
+
     const draftsList = Array.isArray(aiResponse.drafts) && aiResponse.drafts.length
       ? aiResponse.drafts
       : draftTargets.map((section, index) => {
@@ -249,6 +266,26 @@ Return ONLY valid JSON.`;
       if (draftsError) {
         throw new Error(`Failed to save AI proposal drafts to database: ${draftsError.message}`);
       }
+
+      await supabase.from("ai_decision_trace").insert(
+        lockedDrafts.map((draft, index) => {
+          const reference = evidenceByRequirement[index % evidenceByRequirement.length] || {};
+          return {
+            workspace_id: workspaceId,
+            requirement_id: reference.requirement_id || null,
+            requirement_text: reference.requirement_text || draft.section_title || "",
+            evidence_document_id: reference.traceability?.approved_evidence?.id || null,
+            evidence_text: reference.matched_evidence || reference.evidence_items?.[0]?.summary || "",
+            rerank_score: reference.match_score || reference.confidence_score || null,
+            compliance_status: reference.compliance_status || null,
+            draft_section_title: draft.section_title || null,
+            trace: {
+              draft: draft,
+              reference,
+            },
+          };
+        })
+      );
 
       return NextResponse.json({
         success: true,

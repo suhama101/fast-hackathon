@@ -1,5 +1,6 @@
 import { CAPABILITY_LIBRARY } from "../../bid-engine/lib/sampleData.js";
 import { matchRequirementToCapabilities, extractEntitiesFromText } from "../../bid-engine/lib/datasetAnalysis.js";
+import { runCrewStage } from "../../bid-engine/lib/crewBridge.js";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../_lib/requestAuth.js";
 import { getSupabaseAdminOrNull } from "../_lib/supabase.js";
 
@@ -129,11 +130,34 @@ export default async function handler(req, res) {
             client_type: item.client_type,
           }));
 
-      const draftsList = targets.map((target, index) => {
-        const match = matchRequirementToCapabilities(target, capabilitySource, { entities: extractedEntities });
-        const capability = match.capability || capabilitySource[index % capabilitySource.length];
-        return draftFromTarget(target, capability, extractedEntities);
-      });
+      let draftsList = [];
+      try {
+        const crewResult = await runCrewStage("draft", {
+          workspace_title: "RFP Proposal",
+          requirements,
+          approved_evidence: requirements.map((item) => ({
+            requirement_id: item.id,
+            requirement_text: item.requirement_text,
+            compliance_status: item.compliance_status,
+            matched_evidence: item.matched_evidence,
+            evidence_items: item.evidence_items || [],
+          })),
+          draft_targets: targets,
+        });
+        if (crewResult && !crewResult.error && Array.isArray(crewResult.drafts) && crewResult.drafts.length) {
+          draftsList = crewResult.drafts;
+        }
+      } catch (crewError) {
+        console.warn("CrewAI draft fallback:", crewError.message);
+      }
+
+      if (!draftsList.length) {
+        draftsList = targets.map((target, index) => {
+          const match = matchRequirementToCapabilities(target, capabilitySource, { entities: extractedEntities });
+          const capability = match.capability || capabilitySource[index % capabilitySource.length];
+          return draftFromTarget(target, capability, extractedEntities);
+        });
+      }
 
       await workspaceDb.from("proposal_drafts").delete().eq("workspace_id", workspaceId);
 
@@ -153,6 +177,27 @@ export default async function handler(req, res) {
         if (draftsError) {
           throw new Error(`Failed to save proposal drafts to database: ${draftsError.message}`);
         }
+
+        await workspaceDb.from("ai_decision_trace").insert(
+          draftsList.map((draft, index) => {
+            const target = targets[index % targets.length] || {};
+            const match = matchRequirementToCapabilities(target, capabilitySource, { entities: extractedEntities });
+            return {
+              workspace_id: workspaceId,
+              requirement_id: target.id || null,
+              requirement_text: target.requirement_text || draft.section_title || "",
+              evidence_document_id: match.capability?.id || null,
+              evidence_text: match.evidence || "",
+              rerank_score: match.confidence || null,
+              compliance_status: match.compliance_status || null,
+              draft_section_title: draft.section_title || null,
+              trace: {
+                draft,
+                match,
+              },
+            };
+          })
+        );
 
         return res.status(200).json({
           success: true,

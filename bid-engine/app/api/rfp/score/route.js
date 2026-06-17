@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { loadHackathonDataset } from "../../../../lib/datasetLoader";
 import { calculateWinScore } from "../../../../lib/datasetAnalysis";
+import { runCrewStage } from "../../../../lib/crewBridge";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../../../../lib/requestAuth";
 
 const isUuid = (value) =>
@@ -76,6 +77,17 @@ export async function POST(request) {
       rawText: rawText || workspaceRawText,
     });
 
+    let strategy = null;
+    try {
+      strategy = await runCrewStage("strategy", {
+        requirements,
+        score: scores,
+        workspace_title: workspaceId || "RFP Bid",
+      });
+    } catch (crewError) {
+      console.warn("CrewAI strategy fallback:", crewError.message);
+    }
+
     let record = null;
     if (workspaceId && isUuid(workspaceId)) {
       const { data: savedScore, error: dbError } = await supabase
@@ -129,6 +141,7 @@ export async function POST(request) {
         mandatory_partial: scores.mandatory_partial,
         mandatory_failed: scores.mandatory_failed,
       },
+      strategy: strategy && !strategy.error ? strategy : null,
       history_count: bidHistory.length,
       capability_count: capabilities.length,
     }, { status: 200 });

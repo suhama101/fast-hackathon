@@ -1,5 +1,6 @@
 import { mapCriteriaToTaxonomy } from "../../bid-engine/lib/datasetAnalysis.js";
 import { EVALUATION_CRITERIA_TAXONOMY } from "../../bid-engine/lib/sampleData.js";
+import { runCrewStage } from "../../bid-engine/lib/crewBridge.js";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../_lib/requestAuth.js";
 import { getSupabaseAdminOrNull } from "../_lib/supabase.js";
 
@@ -231,16 +232,30 @@ export default async function handler(req, res) {
     // Step 1: Extract requirements (Groq AI → heuristic fallback)
     let extractedData;
     try {
-      extractedData = await extractWithGroq(rawText);
-      const totalItems = [
-        ...(extractedData.mandatory_requirements || []),
-        ...(extractedData.evaluation_criteria || []),
-        ...(extractedData.compliance_clauses || []),
-      ].length;
-      if (totalItems < 2) throw new Error("Groq returned too few items");
+      const crewExtraction = await runCrewStage("extract", {
+        raw_text: rawText,
+        workspace_title: givenBidTitle || "RFP Analysis",
+      });
+      if (crewExtraction && !crewExtraction.error) {
+        extractedData = crewExtraction;
+      }
     } catch (groqErr) {
-      console.warn("Groq fallback:", groqErr.message);
-      extractedData = extractHeuristicFields(rawText);
+      console.warn("CrewAI extraction fallback:", groqErr.message);
+    }
+
+    if (!extractedData) {
+      try {
+        extractedData = await extractWithGroq(rawText);
+        const totalItems = [
+          ...(extractedData.mandatory_requirements || []),
+          ...(extractedData.evaluation_criteria || []),
+          ...(extractedData.compliance_clauses || []),
+        ].length;
+        if (totalItems < 2) throw new Error("Groq returned too few items");
+      } catch (groqErr) {
+        console.warn("Groq fallback:", groqErr.message);
+        extractedData = extractHeuristicFields(rawText);
+      }
     }
 
     // Step 2: Taxonomy mapping

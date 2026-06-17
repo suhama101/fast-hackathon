@@ -9,6 +9,7 @@ import {
   mergeRequirementCandidates,
   toDbRequirementType,
 } from "../../../../lib/intelligence.js";
+import { runCrewStage } from "../../../../lib/crewBridge.js";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../../../../lib/requestAuth";
 
 const isUuid = (value) =>
@@ -110,9 +111,24 @@ Return JSON using arrays of short strings for all relevant fields:
 RFP TEXT:
 ${rawText}`;
 
-    const extractedData = await analyzeWithGroq(extractionPrompt, systemPrompt);
-    if (!extractedData || extractedData.error) {
-      throw new Error(extractedData?.message || "Groq extraction failed.");
+    let extractedData = null;
+    try {
+      const crewExtraction = await runCrewStage("extract", {
+        raw_text: rawText,
+        workspace_title: givenBidTitle || "RFP Analysis",
+      });
+      if (crewExtraction && !crewExtraction.error) {
+        extractedData = crewExtraction;
+      }
+    } catch (crewError) {
+      console.warn("CrewAI extraction fallback:", crewError.message);
+    }
+
+    if (!extractedData) {
+      extractedData = await analyzeWithGroq(extractionPrompt, systemPrompt);
+      if (!extractedData || extractedData.error) {
+        throw new Error(extractedData?.message || "Groq extraction failed.");
+      }
     }
 
     const { data: dbTaxonomy, error: taxonomyError } = await supabase

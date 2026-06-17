@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { reviewProposalWithGroq } from "../../../../lib/reviewerAgent";
+import { runCrewStage } from "../../../../lib/crewBridge";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../../../../lib/requestAuth";
 
 const isUuid = (value) =>
@@ -31,13 +32,28 @@ export async function POST(request) {
       supabase.from("win_scores").select("*").eq("workspace_id", workspaceId).maybeSingle(),
     ]);
 
-    const review = await reviewProposalWithGroq({
+    let crewReview = null;
+    try {
+      crewReview = await runCrewStage("review", {
+        proposalDrafts: drafts || [],
+        requirements: requirements || [],
+        matches: requirements || [],
+        score: score || null,
+        workspaceTitle: workspace?.title || "RFP Proposal",
+      });
+    } catch (crewError) {
+      console.warn("CrewAI review fallback:", crewError.message);
+    }
+
+    const review = crewReview && !crewReview.error
+      ? crewReview
+      : await reviewProposalWithGroq({
       proposalDrafts: drafts || [],
       requirements: requirements || [],
       matches: requirements || [],
       score: score || null,
       workspaceTitle: workspace?.title || "RFP Proposal",
-    });
+      });
 
     return NextResponse.json({
       success: true,

@@ -282,3 +282,110 @@ create policy "Users can update and input score insights of their workspaces"
       and rfp_workspaces.user_id = auth.uid()
     )
   );
+
+
+-- 8. VECTOR KNOWLEDGE BASE FOR REAL RAG
+create extension if not exists vector;
+
+create table if not exists evidence_documents (
+  id uuid default gen_random_uuid() primary key,
+  source_type text not null,
+  source_id text not null,
+  workspace_id uuid references rfp_workspaces(id) on delete cascade,
+  chunk_index integer not null default 0,
+  content text not null,
+  metadata jsonb not null default '{}'::jsonb,
+  embedding vector(1536) not null,
+  created_at timestamptz default timezone('utc'::text, now()) not null,
+  unique (source_type, source_id, chunk_index)
+);
+
+create index if not exists evidence_documents_embedding_idx
+  on evidence_documents
+  using ivfflat (embedding vector_cosine_ops)
+  with (lists = 100);
+
+create index if not exists evidence_documents_metadata_idx
+  on evidence_documents using gin (metadata);
+
+create or replace function match_evidence_documents(
+  query_embedding vector(1536),
+  match_count integer default 8,
+  filter_metadata jsonb default '{}'::jsonb
+)
+returns table (
+  id uuid,
+  source_type text,
+  source_id text,
+  workspace_id uuid,
+  chunk_index integer,
+  content text,
+  metadata jsonb,
+  similarity double precision
+)
+language sql stable
+as $$
+  select
+    evidence_documents.id,
+    evidence_documents.source_type,
+    evidence_documents.source_id,
+    evidence_documents.workspace_id,
+    evidence_documents.chunk_index,
+    evidence_documents.content,
+    evidence_documents.metadata,
+    1 - (evidence_documents.embedding <=> query_embedding) as similarity
+  from evidence_documents
+  where evidence_documents.metadata @> filter_metadata
+  order by evidence_documents.embedding <=> query_embedding
+  limit match_count;
+$$;
+
+create table if not exists ai_decision_trace (
+  id uuid default gen_random_uuid() primary key,
+  workspace_id uuid references rfp_workspaces(id) on delete cascade,
+  requirement_id text,
+  requirement_text text,
+  evidence_document_id uuid references evidence_documents(id) on delete set null,
+  evidence_text text,
+  rerank_score numeric,
+  compliance_status text,
+  draft_section_title text,
+  trace jsonb not null default '{}'::jsonb,
+  created_at timestamptz default timezone('utc'::text, now()) not null
+);
+
+alter table ai_decision_trace enable row level security;
+
+drop policy if exists ai_decision_trace_select_own on ai_decision_trace;
+create policy ai_decision_trace_select_own
+on ai_decision_trace
+for select
+using (
+  exists (
+    select 1
+    from rfp_workspaces w
+    where w.id = workspace_id
+      and w.user_id = auth.uid()
+  )
+);
+
+drop policy if exists ai_decision_trace_modify_own on ai_decision_trace;
+create policy ai_decision_trace_modify_own
+on ai_decision_trace
+for all
+using (
+  exists (
+    select 1
+    from rfp_workspaces w
+    where w.id = workspace_id
+      and w.user_id = auth.uid()
+  )
+)
+with check (
+  exists (
+    select 1
+    from rfp_workspaces w
+    where w.id = workspace_id
+      and w.user_id = auth.uid()
+  )
+);

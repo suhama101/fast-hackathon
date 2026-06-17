@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "../../../lib/supabaseClient";
 import { loadHackathonDataset, datasetSummary } from "../../../lib/datasetLoader";
+import { syncCapabilityCorpus } from "../../../lib/ragEngine";
 
 export async function GET() {
   const dataset = loadHackathonDataset();
@@ -60,6 +61,14 @@ export async function POST() {
       .upsert(capabilityRows, { onConflict: "external_id" });
     if (capabilityError) throw capabilityError;
     results.capability_library = capabilityRows.length;
+
+    try {
+      const ragSync = await syncCapabilityCorpus(capabilityRows, { force: true });
+      results.evidence_documents = ragSync.documentCount || 0;
+    } catch (ragError) {
+      results.evidence_documents = 0;
+      results.rag_warning = ragError.message;
+    }
 
     const { error: bidError } = await supabase
       .from("bid_history")

@@ -12,6 +12,10 @@
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
+    "@langchain/community": "^0.3.39",
+    "@langchain/core": "^0.3.72",
+    "@langchain/openai": "^0.5.16",
+    "@langchain/textsplitters": "^0.1.0",
     "@supabase/supabase-js": "^2.108.1",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
