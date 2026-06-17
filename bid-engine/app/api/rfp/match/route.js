@@ -201,6 +201,11 @@ export async function POST(request) {
         fallback_used: false,
         rag_warning: evidence.rag_warning || null,
         rag_details: evidence.rag_details || null,
+        embedding_provider: evidence.embedding_provider || capabilityIndex[0]?.embedding_provider || "unconfigured",
+        vector_dimensions: evidence.vector_dimensions || capabilityIndex[0]?.vector_dimensions || 1536,
+        average_similarity_score: evidence.average_similarity_score || 0,
+        retrieval_confidence_score: evidence.retrieval_confidence_score || 0,
+        retrieval_quality_improvement: evidence.retrieval_quality_improvement || null,
         traceability: evidence.traceability || null,
       });
       matchingDebug.push({
@@ -209,6 +214,8 @@ export async function POST(request) {
         retrieved_count: evidence.retrieved_chunks?.length || evidence.evidence_items?.length || 0,
         selected_evidence: evidence.selected_evidence || evidence.matched_evidence || "",
         match_status: evidence.match_status,
+        average_similarity_score: evidence.average_similarity_score || 0,
+        retrieval_confidence_score: evidence.retrieval_confidence_score || 0,
         reason: evidence.reason,
       });
     }
@@ -265,9 +272,17 @@ export async function POST(request) {
         expected_evidence_type: match?.expected_evidence_type,
         requirement_category: match?.requirement_category,
         needs_evidence: match?.needs_evidence !== false,
+        average_similarity_score: match?.average_similarity_score || 0,
+        retrieval_confidence_score: match?.retrieval_confidence_score || 0,
         rag_warning: match?.rag_warning || null,
       };
     });
+
+    const evidenceMatches = matches.filter((match) => match.needs_evidence !== false);
+    const averageSimilarityScore = Number((
+      evidenceMatches.reduce((sum, match) => sum + Number(match.average_similarity_score || 0), 0)
+      / Math.max(1, evidenceMatches.length)
+    ).toFixed(4));
 
     return NextResponse.json({
       success: true,
@@ -284,9 +299,13 @@ export async function POST(request) {
         capability_rows: capabilities.length,
         evidence_rows_before: ragSeedStats?.existingRows ?? null,
         evidence_rows_after: ragSeedStats?.finalRows ?? ragSeedStats?.existingRows ?? null,
-        embedding_provider: capabilityIndex[0]?.embedding_model || "local-hashing-1536",
+        embedding_provider: ragSeedStats?.embeddingProvider || capabilityIndex[0]?.embedding_provider || "unconfigured",
+        embedding_model: ragSeedStats?.embeddingModel || capabilityIndex[0]?.embedding_model || "none",
+        vector_dimensions: ragSeedStats?.vectorDimensions || capabilityIndex[0]?.vector_dimensions || 1536,
         chunks_created: ragSeedStats?.documentsChunked || 0,
         vector_search_used: matches.some((match) => match.vector_search_used),
+        average_similarity_score: averageSimilarityScore,
+        retrieval_quality_improvement: matches.find((match) => match.retrieval_quality_improvement)?.retrieval_quality_improvement || null,
         fallback_used: false,
       },
       rag_warning: ragWarnings.length

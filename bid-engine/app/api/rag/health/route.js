@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runRagHealthCheck } from "../../../../lib/ragEngine";
+import { getEmbeddingProviderInfo, runRagHealthCheck } from "../../../../lib/ragEngine";
 
 export async function GET() {
   try {
@@ -8,6 +8,7 @@ export async function GET() {
     console.info("[RAG] health_check", health);
     return NextResponse.json(health, { status });
   } catch (error) {
+    const embeddingInfo = getEmbeddingProviderInfo();
     const health = {
       vector_enabled: false,
       evidence_table_exists: false,
@@ -17,7 +18,10 @@ export async function GET() {
       embedding_generation: "failed",
       vector_insert: "failed",
       vector_search: "failed",
-      embedding_provider: "local-hashing-1536",
+      embedding_provider: embeddingInfo.provider,
+      embedding_model: embeddingInfo.model,
+      vector_dimensions: embeddingInfo.dimensions,
+      real_embeddings: embeddingInfo.real_embeddings,
       rag_status: "FAILED",
       reason: error.message,
     };

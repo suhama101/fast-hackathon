@@ -7,12 +7,14 @@ import { inferRequirementMetadata } from "./intelligence.js";
 
 const VECTOR_TABLE = "evidence_documents";
 const VECTOR_QUERY_NAME = "match_evidence_documents";
-const EMBEDDING_MODEL = "local-hashing-1536";
 const EMBEDDING_DIMENSIONS = 1536;
+const LEGACY_EMBEDDING_MODEL = "local-hashing-1536";
+const EMBEDDING_PROVIDER_PRIORITY = ["jina", "huggingface", "voyage", "openai"];
 const DEFAULT_TOP_K = 6;
 const CHUNK_SIZE = 900;
 const CHUNK_OVERLAP = 120;
 const INSERT_BATCH_SIZE = 100;
+const EMBEDDING_BATCH_SIZE = 32;
 
 const FALLBACK_STOPWORDS = new Set([
   "the", "and", "for", "with", "must", "shall", "will", "this", "that", "from", "have", "has",
@@ -108,6 +110,8 @@ const getSupabaseClient = () => {
 class LocalHashingEmbeddings {
   constructor({ dimensions = EMBEDDING_DIMENSIONS } = {}) {
     this.dimensions = dimensions;
+    this.provider = LEGACY_EMBEDDING_MODEL;
+    this.model = LEGACY_EMBEDDING_MODEL;
   }
 
   async embedDocuments(texts = []) {
@@ -119,7 +123,252 @@ class LocalHashingEmbeddings {
   }
 }
 
-const getEmbeddings = () => new LocalHashingEmbeddings();
+const normalizeEmbeddingVector = (vector = [], dimensions = EMBEDDING_DIMENSIONS) => {
+  const numeric = Array.isArray(vector) ? vector.map((value) => Number(value) || 0) : [];
+  if (numeric.length > dimensions) return normalizeVector(numeric.slice(0, dimensions));
+  if (numeric.length < dimensions) return normalizeVector([...numeric, ...new Array(dimensions - numeric.length).fill(0)]);
+  return normalizeVector(numeric);
+};
+
+const chunkArray = (items = [], size = EMBEDDING_BATCH_SIZE) => {
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+};
+
+const postJson = async (url, { headers = {}, body }) => {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { raw: text };
+  }
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}: ${String(data?.error?.message || data?.message || text).slice(0, 300)}`);
+  }
+  return data;
+};
+
+class JinaEmbeddings {
+  constructor() {
+    this.provider = "jina";
+    this.model = process.env.JINA_EMBEDDING_MODEL || "jina-embeddings-v3";
+    this.apiKey = process.env.JINA_API_KEY || process.env.JINAAI_API_KEY || "";
+    this.sourceDimensions = Number(process.env.JINA_EMBEDDING_DIMENSIONS || 1024);
+    this.dimensions = EMBEDDING_DIMENSIONS;
+  }
+
+  async embedBatch(texts = [], task = "retrieval.passage") {
+    const data = await postJson("https://api.jina.ai/v1/embeddings", {
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+      body: {
+        model: this.model,
+        task,
+        dimensions: this.sourceDimensions,
+        input: texts,
+      },
+    });
+    const vectors = data?.data?.map((item) => item.embedding) || [];
+    if (vectors.length !== texts.length) {
+      throw new Error(`Jina returned ${vectors.length} embeddings for ${texts.length} inputs.`);
+    }
+    return vectors.map((vector) => normalizeEmbeddingVector(vector, this.dimensions));
+  }
+
+  async embedDocuments(texts = []) {
+    const results = [];
+    for (const batch of chunkArray(texts)) {
+      results.push(...await this.embedBatch(batch, "retrieval.passage"));
+    }
+    return results;
+  }
+
+  async embedQuery(text = "") {
+    const [embedding] = await this.embedBatch([text], "retrieval.query");
+    return embedding;
+  }
+}
+
+class HuggingFaceEmbeddings {
+  constructor() {
+    this.provider = "huggingface";
+    this.model = process.env.HUGGINGFACE_EMBEDDING_MODEL || process.env.HF_EMBEDDING_MODEL || "BAAI/bge-small-en-v1.5";
+    this.apiKey = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN || process.env.HF_API_KEY || "";
+    this.dimensions = EMBEDDING_DIMENSIONS;
+  }
+
+  async embedBatch(texts = []) {
+    const data = await postJson(`https://api-inference.huggingface.co/pipeline/feature-extraction/${encodeURIComponent(this.model)}`, {
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+      body: {
+        inputs: texts,
+        options: { wait_for_model: true },
+      },
+    });
+    const rawVectors = Array.isArray(data) && Array.isArray(data[0]) && typeof data[0][0] === "number"
+      ? [data]
+      : data;
+    if (!Array.isArray(rawVectors)) {
+      throw new Error("HuggingFace embedding response was not an array.");
+    }
+    const vectors = rawVectors.map((item) => {
+      if (Array.isArray(item) && typeof item[0] === "number") return item;
+      if (Array.isArray(item) && Array.isArray(item[0])) {
+        const width = item[0].length;
+        const pooled = new Array(width).fill(0);
+        item.forEach((tokenVector) => tokenVector.forEach((value, index) => { pooled[index] += Number(value) || 0; }));
+        return pooled.map((value) => value / item.length);
+      }
+      return [];
+    });
+    if (vectors.length !== texts.length) {
+      throw new Error(`HuggingFace returned ${vectors.length} embeddings for ${texts.length} inputs.`);
+    }
+    return vectors.map((vector) => normalizeEmbeddingVector(vector, this.dimensions));
+  }
+
+  async embedDocuments(texts = []) {
+    const results = [];
+    for (const batch of chunkArray(texts, 8)) {
+      results.push(...await this.embedBatch(batch));
+    }
+    return results;
+  }
+
+  async embedQuery(text = "") {
+    const [embedding] = await this.embedBatch([text]);
+    return embedding;
+  }
+}
+
+class VoyageEmbeddings {
+  constructor() {
+    this.provider = "voyage";
+    this.model = process.env.VOYAGE_EMBEDDING_MODEL || "voyage-3-lite";
+    this.apiKey = process.env.VOYAGE_API_KEY || "";
+    this.dimensions = EMBEDDING_DIMENSIONS;
+  }
+
+  async embedBatch(texts = [], inputType = "document") {
+    const data = await postJson("https://api.voyageai.com/v1/embeddings", {
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+      body: {
+        model: this.model,
+        input: texts,
+        input_type: inputType,
+      },
+    });
+    const vectors = data?.data?.map((item) => item.embedding) || [];
+    if (vectors.length !== texts.length) {
+      throw new Error(`Voyage returned ${vectors.length} embeddings for ${texts.length} inputs.`);
+    }
+    return vectors.map((vector) => normalizeEmbeddingVector(vector, this.dimensions));
+  }
+
+  async embedDocuments(texts = []) {
+    const results = [];
+    for (const batch of chunkArray(texts)) {
+      results.push(...await this.embedBatch(batch, "document"));
+    }
+    return results;
+  }
+
+  async embedQuery(text = "") {
+    const [embedding] = await this.embedBatch([text], "query");
+    return embedding;
+  }
+}
+
+class OpenAICompatibleEmbeddings {
+  constructor() {
+    this.provider = "openai";
+    this.model = process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small";
+    this.apiKey = process.env.OPENAI_API_KEY || "";
+    this.dimensions = EMBEDDING_DIMENSIONS;
+  }
+
+  async embedBatch(texts = []) {
+    const data = await postJson("https://api.openai.com/v1/embeddings", {
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+      body: {
+        model: this.model,
+        input: texts,
+        dimensions: this.dimensions,
+      },
+    });
+    const vectors = data?.data?.map((item) => item.embedding) || [];
+    if (vectors.length !== texts.length) {
+      throw new Error(`OpenAI returned ${vectors.length} embeddings for ${texts.length} inputs.`);
+    }
+    return vectors.map((vector) => normalizeEmbeddingVector(vector, this.dimensions));
+  }
+
+  async embedDocuments(texts = []) {
+    const results = [];
+    for (const batch of chunkArray(texts)) {
+      results.push(...await this.embedBatch(batch));
+    }
+    return results;
+  }
+
+  async embedQuery(text = "") {
+    const [embedding] = await this.embedBatch([text]);
+    return embedding;
+  }
+}
+
+export const getEmbeddingProviderInfo = () => {
+  const requested = String(process.env.EMBEDDING_PROVIDER || "").toLowerCase().trim();
+  const available = {
+    jina: Boolean(process.env.JINA_API_KEY || process.env.JINAAI_API_KEY),
+    huggingface: Boolean(process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN || process.env.HF_API_KEY),
+    voyage: Boolean(process.env.VOYAGE_API_KEY),
+    openai: Boolean(process.env.OPENAI_API_KEY),
+    "local-hashing-1536": process.env.ALLOW_LOCAL_HASH_EMBEDDINGS === "true",
+  };
+  const provider = requested && available[requested]
+    ? requested
+    : EMBEDDING_PROVIDER_PRIORITY.find((candidate) => available[candidate])
+      || (available["local-hashing-1536"] ? "local-hashing-1536" : "");
+
+  if (!provider) {
+    return {
+      provider: "unconfigured",
+      model: "none",
+      dimensions: EMBEDDING_DIMENSIONS,
+      real_embeddings: false,
+      configured: false,
+      reason: "Configure JINA_API_KEY, HUGGINGFACE_API_KEY, VOYAGE_API_KEY, or OPENAI_API_KEY. Local hash embeddings are disabled unless ALLOW_LOCAL_HASH_EMBEDDINGS=true.",
+    };
+  }
+
+  if (provider === "jina") return { provider, model: process.env.JINA_EMBEDDING_MODEL || "jina-embeddings-v3", dimensions: EMBEDDING_DIMENSIONS, real_embeddings: true, configured: true };
+  if (provider === "huggingface") return { provider, model: process.env.HUGGINGFACE_EMBEDDING_MODEL || process.env.HF_EMBEDDING_MODEL || "BAAI/bge-small-en-v1.5", dimensions: EMBEDDING_DIMENSIONS, real_embeddings: true, configured: true };
+  if (provider === "voyage") return { provider, model: process.env.VOYAGE_EMBEDDING_MODEL || "voyage-3-lite", dimensions: EMBEDDING_DIMENSIONS, real_embeddings: true, configured: true };
+  if (provider === "openai") return { provider, model: process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small", dimensions: EMBEDDING_DIMENSIONS, real_embeddings: true, configured: true };
+  return { provider, model: LEGACY_EMBEDDING_MODEL, dimensions: EMBEDDING_DIMENSIONS, real_embeddings: false, configured: true };
+};
+
+const getEmbeddings = () => {
+  const info = getEmbeddingProviderInfo();
+  if (info.provider === "jina") return new JinaEmbeddings();
+  if (info.provider === "huggingface") return new HuggingFaceEmbeddings();
+  if (info.provider === "voyage") return new VoyageEmbeddings();
+  if (info.provider === "openai") return new OpenAICompatibleEmbeddings();
+  if (info.provider === "local-hashing-1536") return new LocalHashingEmbeddings();
+  throw new Error(info.reason);
+};
 
 const getCorpusCount = async (supabase) => {
   const { count, error } = await supabase
@@ -132,6 +381,27 @@ const getCorpusCount = async (supabase) => {
   }
 
   return Number(count || 0);
+};
+
+const getCorpusEmbeddingProfile = async (supabase) => {
+  const { data, error } = await supabase
+    .from(VECTOR_TABLE)
+    .select("metadata")
+    .eq("source_type", "capability_library")
+    .limit(10);
+
+  if (error) {
+    throw new Error(`Failed to inspect RAG corpus embedding profile: ${error.message}`);
+  }
+
+  const providers = unique((data || []).map((row) => row.metadata?.embedding_provider || row.metadata?.embedding_model || LEGACY_EMBEDDING_MODEL));
+  const models = unique((data || []).map((row) => row.metadata?.embedding_model || LEGACY_EMBEDDING_MODEL));
+  return {
+    providers,
+    models,
+    provider: providers[0] || "",
+    model: models[0] || "",
+  };
 };
 
 const getTableCount = async (supabase, tableName) => {
@@ -147,8 +417,10 @@ const getTableCount = async (supabase, tableName) => {
 };
 
 const testVectorInsertAndSearch = async (supabase) => {
+  const embeddingClient = getEmbeddings();
+  const embeddingInfo = getEmbeddingProviderInfo();
   const sourceId = `RAG_HEALTH_${Date.now()}`;
-  const embedding = embedText("RAG health check vector insert and search");
+  const embedding = await embeddingClient.embedQuery("RAG health check vector insert and search");
   let insertedId = null;
 
   try {
@@ -159,7 +431,13 @@ const testVectorInsertAndSearch = async (supabase) => {
         source_id: sourceId,
         chunk_index: 0,
         content: "RAG health check vector insert and search",
-        metadata: { source_type: "rag_health_check", health_check: true },
+        metadata: {
+          source_type: "rag_health_check",
+          health_check: true,
+          embedding_provider: embeddingInfo.provider,
+          embedding_model: embeddingInfo.model,
+          vector_dimensions: embeddingInfo.dimensions,
+        },
         embedding,
       })
       .select("id")
@@ -204,7 +482,10 @@ export const runRagHealthCheck = async () => {
     embedding_generation: "failed",
     vector_insert: "failed",
     vector_search: "failed",
-    embedding_provider: EMBEDDING_MODEL,
+    embedding_provider: getEmbeddingProviderInfo().provider,
+    embedding_model: getEmbeddingProviderInfo().model,
+    vector_dimensions: EMBEDDING_DIMENSIONS,
+    real_embeddings: getEmbeddingProviderInfo().real_embeddings,
     rag_status: "FAILED",
     reason: "",
   };
@@ -324,7 +605,14 @@ const toMetadata = (capability = {}) => {
 };
 
 const capabilityToDocuments = async (capability = {}) => {
-  const metadata = toMetadata(capability);
+  const embeddingInfo = getEmbeddingProviderInfo();
+  const metadata = {
+    ...toMetadata(capability),
+    embedding_provider: embeddingInfo.provider,
+    embedding_model: embeddingInfo.model,
+    vector_dimensions: embeddingInfo.dimensions,
+    real_embeddings: embeddingInfo.real_embeddings,
+  };
   const contentParts = [
     `Project: ${capability.project_name || capability.project_summary || capability.description || "Capability Record"}`,
     capability.project_summary || capability.description || "",
@@ -365,29 +653,58 @@ const capabilityToDocuments = async (capability = {}) => {
 
 export const syncCapabilityCorpus = async (capabilities = [], { force = false } = {}) => {
   const supabase = getSupabaseClient();
+  const embeddingInfo = getEmbeddingProviderInfo();
+  if (!embeddingInfo.configured) {
+    throw new Error(embeddingInfo.reason || "No embedding provider configured.");
+  }
   const capabilityCount = capabilities.length;
   const existingCount = await getCorpusCount(supabase);
+  const existingProfile = existingCount > 0 ? await getCorpusEmbeddingProfile(supabase) : null;
+  const providerMatches = existingCount > 0
+    && existingProfile?.provider === embeddingInfo.provider
+    && existingProfile?.model === embeddingInfo.model;
 
   ragLog("corpus_sync_start", {
     capability_count: capabilityCount,
     existing_rows: existingCount,
+    existing_embedding_provider: existingProfile?.provider || null,
+    target_embedding_provider: embeddingInfo.provider,
+    target_embedding_model: embeddingInfo.model,
     force,
   });
 
-  if (!force && existingCount > 0) {
+  if (!force && existingCount > 0 && providerMatches) {
     ragLog("corpus_sync_skipped", {
       reason: "vector_corpus_present",
       existing_rows: existingCount,
+      embedding_provider: embeddingInfo.provider,
+      embedding_model: embeddingInfo.model,
     });
     return {
       synced: false,
       reason: "vector_corpus_present",
       capabilityCount,
       existingRows: existingCount,
+      finalRows: existingCount,
       documentsChunked: 0,
       embeddingsGenerated: 0,
       rowsInserted: 0,
+      embeddingProvider: embeddingInfo.provider,
+      embeddingModel: embeddingInfo.model,
+      vectorDimensions: embeddingInfo.dimensions,
+      reindexed: false,
     };
+  }
+
+  if (existingCount > 0 && !providerMatches) {
+    ragLog("corpus_reindex_required", {
+      reason: "embedding_provider_changed",
+      existing_rows: existingCount,
+      existing_embedding_provider: existingProfile?.provider || null,
+      existing_embedding_model: existingProfile?.model || null,
+      target_embedding_provider: embeddingInfo.provider,
+      target_embedding_model: embeddingInfo.model,
+    });
   }
 
   const { error: deleteError } = await supabase
@@ -422,6 +739,9 @@ export const syncCapabilityCorpus = async (capabilities = [], { force = false } 
       documentsChunked: 0,
       embeddingsGenerated: 0,
       rowsInserted: 0,
+      embeddingProvider: embeddingInfo.provider,
+      embeddingModel: embeddingInfo.model,
+      vectorDimensions: embeddingInfo.dimensions,
     };
   }
 
@@ -439,8 +759,9 @@ export const syncCapabilityCorpus = async (capabilities = [], { force = false } 
   }
 
   ragLog("embeddings_generated", {
-    model: EMBEDDING_MODEL,
-    dimensions: EMBEDDING_DIMENSIONS,
+    provider: embeddingInfo.provider,
+    model: embeddingInfo.model,
+    dimensions: embeddingInfo.dimensions,
     documents_chunked: documents.length,
     embeddings_generated: embeddings.length,
   });
@@ -502,6 +823,10 @@ export const syncCapabilityCorpus = async (capabilities = [], { force = false } 
     embeddingsGenerated: embeddings.length,
     rowsInserted,
     finalRows: finalCount,
+    embeddingProvider: embeddingInfo.provider,
+    embeddingModel: embeddingInfo.model,
+    vectorDimensions: embeddingInfo.dimensions,
+    reindexed: existingCount > 0,
   };
 };
 
@@ -595,6 +920,17 @@ const buildRagUnavailableResponse = (requirementMeta, queryText, warning, detail
   matched_terms: [],
   requirement_category: requirementMeta.category,
   expected_evidence_type: requirementMeta.expected_evidence_type,
+  embedding_provider: getEmbeddingProviderInfo().provider,
+  vector_dimensions: EMBEDDING_DIMENSIONS,
+  retrieval_confidence_score: 0,
+  average_similarity_score: 0,
+  retrieval_quality_improvement: {
+    baseline: LEGACY_EMBEDDING_MODEL,
+    current_provider: getEmbeddingProviderInfo().provider,
+    current_model: getEmbeddingProviderInfo().model,
+    similarity_delta: 0,
+    note: warning,
+  },
   rag_warning: warning,
   rag_details: details,
   traceability: {
@@ -606,7 +942,38 @@ const buildRagUnavailableResponse = (requirementMeta, queryText, warning, detail
   },
 });
 
+const retrievalMetrics = (ranked = [], queryText = "") => {
+  const similarities = ranked.map((item) => Number(item.similarity || 0)).filter((score) => Number.isFinite(score));
+  const rerankScores = ranked.map((item) => Number(item.rerank_score || 0)).filter((score) => Number.isFinite(score));
+  const legacyScores = ranked.map((item) => cosineSimilarity(embedText(queryText), embedText(item.pageContent || item.content || "")));
+  const averageSimilarityScore = similarities.length
+    ? similarities.reduce((sum, score) => sum + score, 0) / similarities.length
+    : 0;
+  const averageRerankScore = rerankScores.length
+    ? rerankScores.reduce((sum, score) => sum + score, 0) / rerankScores.length
+    : 0;
+  const legacyBestSimilarity = legacyScores.length ? Math.max(...legacyScores) : 0;
+  const currentBestSimilarity = similarities.length ? Math.max(...similarities) : 0;
+  return {
+    average_similarity_score: Number(averageSimilarityScore.toFixed(4)),
+    average_rerank_score: Number(averageRerankScore.toFixed(4)),
+    current_best_similarity: Number(currentBestSimilarity.toFixed(4)),
+    legacy_hash_best_similarity: Number(legacyBestSimilarity.toFixed(4)),
+    retrieval_quality_improvement: {
+      baseline: LEGACY_EMBEDDING_MODEL,
+      current_provider: getEmbeddingProviderInfo().provider,
+      current_model: getEmbeddingProviderInfo().model,
+      similarity_delta: Number((currentBestSimilarity - legacyBestSimilarity).toFixed(4)),
+      note: getEmbeddingProviderInfo().real_embeddings
+        ? "Vector search uses real provider embeddings; legacy hash score is reported only as an approximate baseline over returned chunks."
+        : "Still using legacy local hash embeddings because no real provider is configured.",
+    },
+  };
+};
+
 const buildEvidenceResponse = (requirementMeta, best, ranked, queryText, syncStats = null) => {
+  const metrics = retrievalMetrics(ranked, queryText);
+  const embeddingInfo = getEmbeddingProviderInfo();
   if (!best) {
     return {
       compliance_status: "fail",
@@ -627,6 +994,10 @@ const buildEvidenceResponse = (requirementMeta, best, ranked, queryText, syncSta
       expected_evidence_type: requirementMeta.expected_evidence_type,
       rag_warning: ranked.length ? null : "RAG vector search returned no candidates.",
       rag_details: syncStats,
+      embedding_provider: embeddingInfo.provider,
+      vector_dimensions: embeddingInfo.dimensions,
+      retrieval_confidence_score: metrics.average_rerank_score || metrics.average_similarity_score,
+      ...metrics,
       traceability: {
         query: queryText,
         approved_evidence: null,
@@ -682,6 +1053,10 @@ const buildEvidenceResponse = (requirementMeta, best, ranked, queryText, syncSta
     expected_evidence_type: requirementMeta.expected_evidence_type,
     rag_warning: null,
     rag_details: syncStats,
+    embedding_provider: embeddingInfo.provider,
+    vector_dimensions: embeddingInfo.dimensions,
+    retrieval_confidence_score: Number((Number(best.rerank_score || 0) || Number(best.similarity || 0)).toFixed(4)),
+    ...metrics,
     traceability: {
       query: queryText,
       approved_evidence: best,
@@ -693,11 +1068,14 @@ const buildEvidenceResponse = (requirementMeta, best, ranked, queryText, syncSta
 
 export const buildCapabilityIndex = (capabilities = []) => capabilities.map((capability) => {
   const enriched = enrichCapability(capability);
+  const embeddingInfo = getEmbeddingProviderInfo();
   return {
     ...enriched,
     source_reference: capability.external_id || capability.id || capability.project_name || "CAPABILITY",
     vector_ready: true,
-    embedding_model: EMBEDDING_MODEL,
+    embedding_provider: embeddingInfo.provider,
+    embedding_model: embeddingInfo.model,
+    vector_dimensions: embeddingInfo.dimensions,
   };
 });
 

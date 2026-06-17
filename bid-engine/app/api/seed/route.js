@@ -65,6 +65,9 @@ export async function POST() {
     try {
       const ragSync = await syncCapabilityCorpus(capabilityRows, { force: true });
       results.evidence_documents = ragSync.documentCount || 0;
+      results.embedding_provider = ragSync.embeddingProvider;
+      results.embedding_model = ragSync.embeddingModel;
+      results.vector_dimensions = ragSync.vectorDimensions;
     } catch (ragError) {
       results.evidence_documents = 0;
       results.rag_warning = ragError.message;
