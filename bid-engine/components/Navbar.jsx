@@ -111,6 +111,15 @@ export default function Navbar({
 
         {/* ── Right side: user + menu ── */}
         <div className="flex items-center gap-3 flex-shrink-0">
+          {setActiveTab && (
+            <button
+              onClick={() => setActiveTab("score")}
+              className="hidden sm:inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold border border-purple-500 shadow-md shadow-purple-950/30 transition"
+            >
+              Win Score / GO-NO-GO
+            </button>
+          )}
+
           {userEmail && (
             <span className="hidden lg:block text-[11px] font-mono text-slate-500 max-w-[160px] truncate">
               {userEmail}

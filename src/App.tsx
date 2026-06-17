@@ -930,18 +930,28 @@ export default function App() {
                 </p>
               </div>
               
-              <div className="px-3.5 py-2 bg-[#1a1a2e] border border-purple-955/20 rounded-lg flex items-center gap-2">
-                <span className={`w-2.5 h-2.5 rounded-full ${currentWorkspace?.id ? "bg-emerald-500" : "bg-amber-400"} animate-pulse shrink-0`} />
-                <div className="text-xs font-mono">
-                  <span className="text-slate-500">Supabase workspace: </span>
-                  <span className={currentWorkspace?.id ? "text-emerald-400 font-bold" : "text-amber-300 font-bold"}>
-                    {isLoadingWorkspace
-                      ? "LOADING"
-                      : currentWorkspace?.title
-                        ? compactText(currentWorkspace.title, 34)
-                        : "NEW RFP"}
-                  </span>
+              <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+                <div className="px-3.5 py-2 bg-[#1a1a2e] border border-purple-955/20 rounded-lg flex items-center gap-2">
+                  <span className={`w-2.5 h-2.5 rounded-full ${currentWorkspace?.id ? "bg-emerald-500" : "bg-amber-400"} animate-pulse shrink-0`} />
+                  <div className="text-xs font-mono">
+                    <span className="text-slate-500">Supabase workspace: </span>
+                    <span className={currentWorkspace?.id ? "text-emerald-400 font-bold" : "text-amber-300 font-bold"}>
+                      {isLoadingWorkspace
+                        ? "LOADING"
+                        : currentWorkspace?.title
+                          ? compactText(currentWorkspace.title, 34)
+                          : "NEW RFP"}
+                    </span>
+                  </div>
                 </div>
+
+                <button
+                  onClick={() => setActiveTab("score")}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold border border-purple-500 shadow-lg shadow-purple-950/30 transition"
+                >
+                  <Award className="h-4 w-4" />
+                  Win Score / GO-NO-GO
+                </button>
               </div>
             </div>
 
@@ -972,6 +982,24 @@ export default function App() {
                 })}
               </div>
             </div>
+
+            {activeTab !== "score" && (
+              <div className="bg-purple-950/25 border border-purple-800/50 rounded-xl p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shadow-xl">
+                <div>
+                  <h3 className="text-sm font-bold text-white">Win Score Calculator</h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Open the GO / NO-GO calculator to calculate or view the saved win probability.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setActiveTab("score")}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold transition"
+                >
+                  <Award className="h-4 w-4" />
+                  Open Win Score Calculator
+                </button>
+              </div>
+            )}
 
             {/* Tab content */}
             <div>

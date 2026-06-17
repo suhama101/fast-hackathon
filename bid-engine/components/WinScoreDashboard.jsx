@@ -82,7 +82,7 @@ export default function WinScoreDashboard({
 
         <button
           onClick={onPredictScore}
-          disabled={isPredicting || isLoadingScore || requirements.length === 0}
+          disabled={isPredicting || isLoadingScore}
           className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-semibold text-sm transition"
         >
           <RefreshCw className={`h-4 w-4 ${isPredicting || isLoadingScore ? "animate-spin" : ""}`} />
@@ -102,7 +102,7 @@ export default function WinScoreDashboard({
           <p className="text-xs text-slate-500 mt-1">Run the calculator to save and display the GO / NO-GO result.</p>
           <button
             onClick={onPredictScore}
-            disabled={isPredicting || requirements.length === 0}
+            disabled={isPredicting}
             className="mt-5 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-semibold text-sm transition"
           >
             <RefreshCw className={`h-4 w-4 ${isPredicting ? "animate-spin" : ""}`} />
