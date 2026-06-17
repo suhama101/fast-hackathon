@@ -87,27 +87,66 @@ const buildMatchMatrix = (rows: any[] = []) =>
   }, {});
 
 const normalizeScore = (payload: any) => {
-  const score = payload?.scores || payload?.record || payload;
-  if (!score || (score.total_score === undefined && score.winScore === undefined)) return null;
+  const score = payload?.scores || payload?.record || payload?.score || payload;
+  if (
+    !score ||
+    (
+      score.total_score === undefined &&
+      score.winScore === undefined &&
+      score.overall_probability === undefined &&
+      score.overallProbability === undefined &&
+      score.win_probability === undefined
+    )
+  ) return null;
 
-  const riskPenalty = Number(score.risk_penalty_score ?? 35);
-  const decision = score.decision || (Number(score.total_score ?? score.winScore) >= 70 ? "GO" : "NO-GO");
+  const overallProbability = Number(
+    score.total_score ??
+    score.winScore ??
+    score.overall_probability ??
+    score.overallProbability ??
+    score.win_probability ??
+    0
+  );
+  const riskPenalty = Number(score.risk_penalty_score ?? score.riskPenalty ?? 0);
+  const riskScore = Number(score.risk_score ?? score.riskScore ?? (riskPenalty ? Math.max(0, 100 - riskPenalty) : 0));
+  const decision = score.decision || score.go_no_go || score.goNoGo || (overallProbability >= 70 ? "GO" : "NO-GO");
+  const scoreComponents = score.score_components || score.components || {};
+  const blockers = [
+    ...(Array.isArray(score.compliance_blockers) ? score.compliance_blockers : []),
+    ...(Array.isArray(score.blockers) ? score.blockers : []),
+  ];
+  const missingEvidence = [
+    ...(Array.isArray(score.missing_evidence) ? score.missing_evidence : []),
+    ...(Array.isArray(score.missingEvidence) ? score.missingEvidence : []),
+  ];
+  const recommendedActions = Array.isArray(score.recommendations)
+    ? score.recommendations
+    : Array.isArray(score.recommended_actions)
+      ? score.recommended_actions
+      : [
+          decision === "GO"
+            ? "Proceed with proposal drafting while keeping final compliance proof attached."
+            : "Close failed mandatory gaps before submitting this opportunity.",
+          "Review budget alignment, matched evidence, and risk score before final approval.",
+        ];
 
   return {
-    winScore: Number(score.total_score ?? score.winScore ?? 0),
+    winScore: overallProbability,
     benchmarks: {
-      budgetAlignment: Number(score.budget_alignment ?? score.budgetAlignment ?? 0),
-      capabilityMatch: Number(score.capability_match ?? score.capabilityMatch ?? 0),
-      complianceScore: Number(score.compliance_score ?? score.complianceScore ?? 0),
-      riskBuffer: Math.max(0, 100 - riskPenalty),
+      budgetAlignment: Number(score.budget_alignment ?? score.budgetAlignment ?? score.budget_sync ?? 0),
+      capabilityMatch: Number(score.capability_match ?? score.capabilityMatch ?? score.capability_alignment ?? 0),
+      complianceScore: Number(score.compliance_score ?? score.complianceScore ?? score.compliance_density ?? 0),
+      evidenceCoverage: Number(score.evidence_coverage ?? score.evidenceCoverage ?? scoreComponents.evidence_coverage ?? score.capability_match ?? 0),
+      riskBuffer: riskScore,
     },
     decision,
-    remedialActions: [
-      decision === "GO"
-        ? "Proceed with proposal drafting while keeping final compliance proof attached."
-        : "Close failed mandatory gaps before submitting this opportunity.",
-      "Review budget alignment, matched evidence, and risk score before final approval.",
-    ],
+    mandatoryTotal: Number(score.mandatory_total ?? 0),
+    mandatoryPassed: Number(score.mandatory_passed ?? 0),
+    mandatoryPartial: Number(score.mandatory_partial ?? 0),
+    mandatoryFailed: Number(score.mandatory_failed ?? 0),
+    remedialActions: recommendedActions,
+    complianceBlockers: blockers,
+    missingEvidence,
     raw: score,
   };
 };
@@ -142,7 +181,27 @@ export default function App() {
   const [isDrafting, setIsDrafting] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isPredicting, setIsPredicting] = useState(false);
+  const [isLoadingScore, setIsLoadingScore] = useState(false);
+  const [scoreWorkspaceId, setScoreWorkspaceId] = useState<string | null>(null);
   const [alert, setAlert] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const workflowSteps = [
+    { id: "upload", label: "Upload RFP", complete: requirements.length > 0 },
+    { id: "requirements", label: "Requirements", complete: requirements.length > 0 },
+    { id: "compliance", label: "Compliance Check", complete: Object.keys(matchMatrix).length > 0 },
+    { id: "draft", label: "AI Draft", complete: savedDrafts.length > 0 || Boolean(activeDraftText) },
+    { id: "score", label: "Win Score", complete: Boolean(ratingAnalysis) },
+  ];
+
+  const canAccessStep = (index: number) => {
+    const step = workflowSteps[index];
+    if (!step) return false;
+    if (index === 0 || step.complete) return true;
+    if (step.id === "score") {
+      return requirements.length > 0 || savedDrafts.length > 0 || Boolean(activeDraftText) || Boolean(ratingAnalysis);
+    }
+    return workflowSteps[index - 1]?.complete || false;
+  };
 
   const getAuthHeaders = (headers: Record<string, string> = {}) => {
     const token = localStorage.getItem("bid_engine_token");
@@ -234,6 +293,27 @@ export default function App() {
     }
   };
 
+  const loadSavedWinScore = async (workspaceId: string) => {
+    if (!workspaceId) return;
+    setIsLoadingScore(true);
+    try {
+      const response = await fetch(`/api/rfp/score?workspaceId=${encodeURIComponent(workspaceId)}`, {
+        credentials: "include",
+        headers: getAuthHeaders(),
+      });
+      const data: any = await readApiResponse(response);
+      if (!response.ok) {
+        throw new Error(data.error || `Saved win score load failed (${response.status}).`);
+      }
+      setRatingAnalysis(normalizeScore(data.record));
+      setScoreWorkspaceId(workspaceId);
+    } catch (error) {
+      setScoreWorkspaceId(workspaceId);
+    } finally {
+      setIsLoadingScore(false);
+    }
+  };
+
   const loadWorkspaceDetails = async (workspaceId: string) => {
     if (!workspaceId) return;
 
@@ -258,7 +338,14 @@ export default function App() {
     setActiveDraft(firstDraft);
     setActiveDraftText(firstDraft?.content || "");
     setRatingAnalysis(normalizeScore(data.score));
+    setScoreWorkspaceId(data.score ? workspaceId : null);
   };
+
+  useEffect(() => {
+    if (activeTab === "score" && currentWorkspace?.id && scoreWorkspaceId !== currentWorkspace.id) {
+      void loadSavedWinScore(currentWorkspace.id);
+    }
+  }, [activeTab, currentWorkspace?.id, scoreWorkspaceId]);
 
   const loadLatestWorkspace = async () => {
     if (!isAuthenticated) return;
@@ -400,6 +487,7 @@ export default function App() {
       setActiveDraft(null);
       setActiveDraftText("");
       setRatingAnalysis(null);
+      setScoreWorkspaceId(null);
       setScreen("landing");
     }
   };
@@ -551,6 +639,7 @@ export default function App() {
       }
 
       setRatingAnalysis(normalizeScore(data.scores || data.record));
+      setScoreWorkspaceId(currentWorkspace.id);
       setAlert({ type: "success", text: "Calculated and saved win probability plus GO/NO-GO decision." });
       setActiveTab("score");
     } catch (error: any) {
@@ -813,6 +902,8 @@ export default function App() {
           <Navbar
             activeTab={activeTab}
             setActiveTab={setActiveTab}
+            workflowSteps={workflowSteps}
+            canAccessStep={canAccessStep}
             userEmail={userEmail}
             onSignOut={handleSignOut}
           />
@@ -851,6 +942,34 @@ export default function App() {
                         : "NEW RFP"}
                   </span>
                 </div>
+              </div>
+            </div>
+
+            <div className="bg-[#1a1a2e] border border-purple-950/40 rounded-xl p-4 shadow-xl">
+              <div className="flex flex-wrap gap-2">
+                {workflowSteps.map((step, index) => {
+                  const isActive = activeTab === step.id;
+                  const isLocked = !canAccessStep(index);
+                  return (
+                    <button
+                      key={step.id}
+                      onClick={() => !isLocked && setActiveTab(step.id)}
+                      disabled={isLocked}
+                      className={`px-3 py-2 rounded-lg text-xs font-bold border transition ${
+                        isActive
+                          ? "bg-purple-600 text-white border-purple-500"
+                          : step.complete
+                            ? "bg-emerald-950/30 text-emerald-300 border-emerald-900/50 hover:border-emerald-600"
+                            : isLocked
+                              ? "bg-slate-900/50 text-slate-600 border-slate-800 cursor-not-allowed"
+                              : "bg-[#0a0a0f]/60 text-slate-300 border-slate-800 hover:border-purple-700"
+                      }`}
+                    >
+                      {step.complete ? "Done " : isLocked ? "Locked " : `${index + 1}. `}
+                      {step.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -901,6 +1020,7 @@ export default function App() {
                   ratingAnalysis={ratingAnalysis}
                   onPredictScore={executePredictScore}
                   isPredicting={isPredicting}
+                  isLoadingScore={isLoadingScore}
                   requirements={requirements}
                 />
               )}

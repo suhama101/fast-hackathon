@@ -29,8 +29,31 @@ const normalizeRequirement = (req, index = 0) => ({
 
 export default async function handler(req, res) {
   try {
+    if (req.method === "GET") {
+      const workspaceId = req.query?.workspaceId || req.query?.id;
+      const auth = await requireAuthenticatedUser(req);
+      if (auth.errorResponse) return res.status(auth.errorResponse.status).json(auth.errorResponse.body);
+
+      if (!isUuid(workspaceId)) {
+        return res.status(400).json({ success: false, error: "A valid workspaceId UUID is required." });
+      }
+
+      const ownership = await requireWorkspaceOwner(req, workspaceId);
+      if (ownership.errorResponse) return res.status(ownership.errorResponse.status).json(ownership.errorResponse.body);
+
+      const workspaceDb = getSupabaseAdminOrNull() || auth.supabase;
+      const { data: record, error } = await workspaceDb
+        .from("win_scores")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .maybeSingle();
+
+      if (error) throw error;
+      return res.status(200).json({ success: true, workspaceId, record: record || null });
+    }
+
     if (req.method !== "POST") {
-      res.setHeader("Allow", ["POST"]);
+      res.setHeader("Allow", ["GET", "POST"]);
       return res.status(405).json({ error: "Method not allowed" });
     }
 

@@ -1,7 +1,25 @@
 "use client";
 
 import React from "react";
-import { Award, ShieldAlert, RefreshCw, BarChart3, Info, Check, X } from "lucide-react";
+import { Award, BarChart3, RefreshCw, ShieldAlert, Target, TrendingUp } from "lucide-react";
+
+const numberValue = (value, fallback = 0) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(100, Math.round(numeric))) : fallback;
+};
+
+const listFrom = (...values) =>
+  values.flatMap((value) => {
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (typeof value === "string" && value.trim()) return [value.trim()];
+    return [];
+  });
+
+const itemText = (item) => {
+  if (typeof item === "string") return item;
+  if (!item || typeof item !== "object") return String(item || "");
+  return item.title || item.issue || item.requirement || item.description || item.action || JSON.stringify(item);
+};
 
 export default function WinScoreDashboard({
   activeBidTitle,
@@ -10,285 +28,158 @@ export default function WinScoreDashboard({
   isPredicting,
   isLoadingScore = false,
   requirements = [],
-  runtimeDebug = null
 }) {
   const analysis = ratingAnalysis;
-  const winScore = Number(analysis?.winScore || 0);
-  const decision = analysis?.decision || (winScore > 70 ? "GO" : "NO-GO");
-  const scoreButtonLabel = analysis ? "Recalculate Win Score" : "Calculate Win Score";
-  const evidenceCoverage = analysis?.benchmarks?.evidenceCoverage
-    ?? analysis?.score_components?.evidence_coverage
-    ?? analysis?.benchmarks?.capabilityMatch
-    ?? 0;
-  const capabilityMatch = analysis?.benchmarks?.capabilityMatch ?? 0;
-  const complianceScore = analysis?.benchmarks?.complianceScore ?? 0;
-  const riskScore = analysis?.benchmarks?.riskBuffer ?? 0;
-  const budgetAlignment = analysis?.benchmarks?.budgetAlignment ?? analysis?.benchmarks?.commercialAlignment ?? null;
-  const complianceBlockers = requirements.filter((requirement) =>
-    ["fail", "no match"].includes(String(requirement.status || requirement.compliance_status || "").toLowerCase())
+  const winScore = numberValue(
+    analysis?.winScore ??
+      analysis?.overall_probability ??
+      analysis?.overallProbability ??
+      analysis?.total_score
   );
+  const decision = analysis?.decision || analysis?.go_no_go || (winScore >= 70 ? "GO" : "NO-GO");
+  const benchmarks = analysis?.benchmarks || {};
+  const complianceScore = numberValue(benchmarks.complianceScore ?? analysis?.compliance_score);
+  const capabilityScore = numberValue(benchmarks.capabilityMatch ?? analysis?.capability_match);
+  const evidenceCoverage = numberValue(benchmarks.evidenceCoverage ?? analysis?.evidence_coverage ?? capabilityScore);
+  const budgetAlignment = numberValue(benchmarks.budgetAlignment ?? analysis?.budget_alignment);
+  const riskScore = numberValue(benchmarks.riskBuffer ?? analysis?.risk_score ?? analysis?.risk_mitigation);
+  const hasScore = Boolean(analysis);
+  const failedRequirements = requirements.filter((requirement) =>
+    ["fail", "no match", "non-compliant"].includes(
+      String(requirement.status || requirement.compliance_status || "").toLowerCase()
+    )
+  );
+  const blockers = listFrom(
+    analysis?.complianceBlockers,
+    analysis?.compliance_blockers,
+    failedRequirements.map((requirement) => requirement.title || requirement.description)
+  );
+  const missingEvidence = listFrom(analysis?.missingEvidence, analysis?.missing_evidence);
+  const recommendedActions = listFrom(
+    analysis?.remedialActions,
+    analysis?.recommendations,
+    analysis?.recommended_actions
+  );
+  const defaultActions = [
+    decision === "GO"
+      ? "Proceed with final bid review and keep supporting evidence attached."
+      : "Close failed mandatory gaps before submitting this opportunity.",
+    "Review budget alignment, matched evidence, and risk score before final approval.",
+  ];
+  const scoreButtonLabel = hasScore ? "Recalculate Win Score" : "Calculate Win Score";
 
   return (
-    <div className="bg-[#1a1a2e] p-6 rounded-xl border border-purple-950/40 shadow-xl space-y-6" id="win-score-panel">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-purple-950/20 gap-4">
+    <section className="bg-[#1a1a2e] border border-purple-950/40 rounded-xl shadow-xl p-6 space-y-6" id="win-score-calculator">
+      <div className="flex flex-col gap-4 border-b border-purple-950/30 pb-5 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-            <Award className="text-purple-400 h-5 w-5" />
-            Win Score Dashboard
+          <p className="text-[11px] uppercase tracking-[0.2em] text-purple-300 font-bold">Win Score</p>
+          <h2 className="text-2xl font-extrabold text-white flex items-center gap-2">
+            <Award className="h-6 w-6 text-purple-400" />
+            Win Score / GO-NO-GO Calculator
           </h2>
-          <p className="text-slate-400 text-sm mt-1">
-            Predict potential win coefficients, assess risks, and track organizational preparedness.
-          </p>
+          <p className="text-sm text-slate-400 mt-1">{activeBidTitle || "RFP Bid Response Pipeline"}</p>
         </div>
 
         <button
           onClick={onPredictScore}
-          disabled={isPredicting || requirements.length === 0}
-          className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white font-semibold rounded-lg text-xs transition flex items-center justify-center gap-2 cursor-pointer"
+          disabled={isPredicting || isLoadingScore || requirements.length === 0}
+          className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-semibold text-sm transition"
         >
-          {isPredicting ? (
-            <>
-              <RefreshCw className="h-3 w-3 animate-spin" />
-              <span>Calculating Model Fit...</span>
-            </>
-          ) : (
-            <>
-              <RefreshCw className="h-3 w-3" />
-              <span>{scoreButtonLabel}</span>
-            </>
-          )}
+          <RefreshCw className={`h-4 w-4 ${isPredicting || isLoadingScore ? "animate-spin" : ""}`} />
+          <span>{isPredicting ? "Calculating..." : scoreButtonLabel}</span>
         </button>
       </div>
 
       {isLoadingScore ? (
-        <div className="text-center py-20 bg-[#0a0a0f] rounded-xl border border-purple-950/10">
-          <RefreshCw className="h-10 w-10 text-purple-400 mx-auto mb-2 animate-spin" />
-          <p className="text-slate-400 text-sm">Loading saved Win Score...</p>
+        <div className="rounded-xl border border-purple-950/20 bg-[#0a0a0f] p-12 text-center">
+          <RefreshCw className="h-10 w-10 text-purple-400 mx-auto mb-3 animate-spin" />
+          <p className="text-sm text-slate-400">Loading saved Win Score...</p>
         </div>
-      ) : requirements.length === 0 ? (
-        <div className="text-center py-20 bg-[#0a0a0f] rounded-xl border border-purple-950/10">
-          <ShieldAlert className="h-10 w-10 text-slate-600 mx-auto mb-2" />
-          <p className="text-slate-400 text-sm">No analysis history found for this workspace.</p>
-          <p className="text-slate-500 text-xs mt-1">Please upload & extract requirements in Step 1 to compute win coefficients.</p>
-        </div>
-      ) : !analysis ? (
-        <div className="text-center py-20 bg-[#0a0a0f] rounded-xl border border-purple-950/10">
-          <ShieldAlert className="h-10 w-10 text-slate-600 mx-auto mb-2" />
-          <p className="text-slate-400 text-sm">Win Score has not been calculated yet</p>
-          <p className="text-slate-500 text-xs mt-1">
-            Click Calculate Win Score to call the backend scoring API and save the GO / NO-GO result.
-          </p>
+      ) : !hasScore ? (
+        <div className="rounded-xl border border-dashed border-purple-900/40 bg-[#0a0a0f] p-12 text-center">
+          <ShieldAlert className="h-10 w-10 text-slate-600 mx-auto mb-3" />
+          <p className="text-base font-semibold text-slate-300">Win Score has not been calculated yet</p>
+          <p className="text-xs text-slate-500 mt-1">Run the calculator to save and display the GO / NO-GO result.</p>
           <button
             onClick={onPredictScore}
-            disabled={isPredicting}
-            className="mt-5 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 text-white font-semibold text-sm transition"
+            disabled={isPredicting || requirements.length === 0}
+            className="mt-5 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-semibold text-sm transition"
           >
-            {isPredicting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            <RefreshCw className={`h-4 w-4 ${isPredicting ? "animate-spin" : ""}`} />
             <span>Calculate Win Score</span>
           </button>
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Circular Score & GO/NO-GO Display row */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            {/* Circle Progress */}
-            <div className="bg-[#0a0a0f] rounded-xl border border-purple-950/20 p-6 flex flex-col items-center justify-center text-center">
-              <span className="text-xs font-mono font-bold text-slate-400 uppercase tracking-widest block mb-4">
-                Overall Probability
-              </span>
-
-              <div className="relative flex items-center justify-center">
-                <svg className="w-40 h-40">
-                  <circle
-                    className="text-slate-900"
-                    strokeWidth="10"
-                    stroke="currentColor"
-                    fill="transparent"
-                    r="68"
-                    cx="80"
-                    cy="80"
-                  />
-                  <circle
-                    className="text-purple-500"
-                    strokeWidth="10"
-                    strokeDasharray={427}
-                    strokeDashoffset={427 - (427 * winScore) / 100}
-                    strokeLinecap="round"
-                    stroke="currentColor"
-                    fill="transparent"
-                    r="68"
-                    cx="80"
-                    cy="80"
-                    transform="rotate(-90 80 80)"
-                  />
-                </svg>
-                <div className="absolute flex flex-col items-center justify-center">
-                  <span className="text-4xl font-extrabold text-white">{winScore}%</span>
-                  <span className="text-[10px] font-mono text-slate-500 mt-1">WIN CHANCE</span>
-                </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-1 rounded-xl border border-purple-900/30 bg-[#0a0a0f] p-6 text-center">
+              <p className="text-xs uppercase tracking-widest text-slate-500 font-mono">Overall Win Probability</p>
+              <div className="mt-4 text-6xl font-extrabold text-white">{winScore}%</div>
+              <div className={`mt-4 inline-flex px-4 py-1.5 rounded-full text-sm font-extrabold border ${
+                decision === "GO"
+                  ? "bg-emerald-950/50 text-emerald-300 border-emerald-800"
+                  : "bg-rose-950/50 text-rose-300 border-rose-800"
+              }`}>
+                {decision}
               </div>
-
-              <div className="mt-4 flex items-center gap-2">
-                <span className="text-xs text-slate-400">Decision Gateway:</span>
-                <span className={`px-3 py-1 text-xs font-extrabold rounded-full ${
-                  decision === "GO" 
-                    ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
-                    : "bg-rose-950 text-rose-300 border border-rose-800"
-                }`}>
-                  {decision}
-                </span>
-              </div>
-
-              {/* Show real compliance counts if available */}
-              {analysis.mandatoryTotal > 0 && (
-              <div className="mt-3 text-[10px] font-mono text-slate-500 space-y-0.5 border-t border-purple-950/20 pt-3 w-full text-left">
-                  <div className="flex justify-between">
-                    <span>Mandatory Total:</span>
-                    <span className="text-slate-300">{analysis.mandatoryTotal}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-emerald-400">Passed:</span>
-                    <span className="text-emerald-300">{analysis.mandatoryPassed}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-amber-400">Partial:</span>
-                    <span className="text-amber-300">{analysis.mandatoryPartial}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-rose-400">Failed:</span>
-                    <span className="text-rose-300">{analysis.mandatoryFailed}</span>
-                  </div>
-                <div className="flex justify-between border-t border-purple-950/20 pt-1 mt-1">
-                  <span className="text-purple-300">Compliance:</span>
-                  <span className="text-purple-200 font-bold">{analysis.benchmarks?.complianceScore}%</span>
-                </div>
-                {analysis.decisionReasoning && (
-                  <p className="pt-2 text-[10px] text-slate-400 leading-relaxed">
-                    {analysis.decisionReasoning}
-                  </p>
-                )}
-              </div>
-            )}
+              <p className="mt-3 text-xs text-slate-500">GO / NO-GO decision</p>
             </div>
 
-            {/* Metric breakdown bars */}
-            <div className="bg-[#0a0a0f] rounded-xl border border-purple-950/20 p-6 col-span-2 space-y-4">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-purple-300 font-mono flex items-center gap-1.5 border-b border-purple-950/45 pb-2">
-                <BarChart3 className="h-4 w-4 text-purple-400" />
-                Core Performance Sub-scores
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-                {[
-                  { label: "Compliance Score", val: complianceScore, color: "bg-emerald-500", desc: "Mandatory clauses satisfied" },
-                  { label: "Evidence Coverage", val: evidenceCoverage, color: "bg-blue-500", desc: "Requirements backed by evidence" },
-                  { label: "Capability Match", val: capabilityMatch, color: "bg-purple-500", desc: "Capability fit against RFP needs" },
-                  { label: "Risk Score", val: riskScore, color: "bg-rose-500", desc: "Delivery and compliance risk buffer" },
-                  ...(budgetAlignment !== null ? [{ label: "Budget / Commercial Alignment", val: budgetAlignment, color: "bg-amber-500", desc: "Commercial fit where available" }] : [])
-                ].map((item, idx) => (
-                  <div key={idx} className="bg-[#1a1a2e]/40 p-3 rounded-lg border border-purple-950/10 space-y-2">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-semibold text-slate-300">{item.label}</span>
-                      <span className="font-mono font-bold text-white">{item.val}%</span>
+            <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {[
+                { label: "Compliance Density / Compliance Score", value: complianceScore, icon: Target },
+                { label: "Capability Alignment / Evidence Coverage", value: Math.max(capabilityScore, evidenceCoverage), icon: TrendingUp },
+                { label: "Budget Alignment", value: budgetAlignment, icon: BarChart3 },
+                { label: "Risk Mitigation / Risk Score", value: riskScore, icon: ShieldAlert },
+              ].map((item) => {
+                const Icon = item.icon;
+                return (
+                  <div key={item.label} className="rounded-xl border border-purple-950/20 bg-[#0a0a0f] p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <Icon className="h-5 w-5 text-purple-400" />
+                      <span className="text-xl font-extrabold text-white">{item.value}%</span>
                     </div>
-                    {/* Bar Chart representation */}
-                    <div className="w-full bg-[#1a1a2e] h-2.5 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full ${item.color} rounded-full transition-all duration-500`}
-                        style={{ width: `${item.val}%` }}
-                      />
+                    <p className="mt-3 text-sm font-semibold text-slate-300">{item.label}</p>
+                    <div className="mt-3 h-2 rounded-full bg-[#1a1a2e] overflow-hidden">
+                      <div className="h-full rounded-full bg-purple-500" style={{ width: `${item.value}%` }} />
                     </div>
-                    <span className="text-[10px] text-slate-500 font-mono block">{item.desc}</span>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
-
           </div>
 
-          {/* AI Decision Recommendations box */}
-          <div className="bg-[#0a0a0f] rounded-xl border border-purple-950/20 p-6">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-purple-300 font-mono flex items-center gap-1.5 border-b border-purple-950/45 pb-2">
-              <Info className="h-4 w-4 text-purple-400" />
-              Strategic AI Recommendations & Remediation
-            </h3>
-            
-            <div className="mt-4 space-y-3 font-sans text-xs">
-              {decision === "GO" ? (
-                <div className="p-3 bg-emerald-950/20 border border-emerald-905/30 rounded-lg text-emerald-300">
-                  <div className="font-bold mb-1 flex items-center gap-1">
-                    <Check className="h-4 w-4 text-emerald-400" />
-                    Winning Position Identified
-                  </div>
-                  This bid displays strongly. Your organizational capability library provides deep verified project evidence that satisfies over 70% of mandatory constraints with strong SLA parameters. Proceed to final compliance review.
-                </div>
-              ) : (
-                <div className="p-3 bg-rose-950/20 border border-rose-905/30 rounded-lg text-rose-300">
-                  <div className="font-bold mb-1 flex items-center gap-1">
-                    <X className="h-4 w-4 text-rose-400" />
-                    Compliance Barriers Found
-                  </div>
-                  This bid score falls below the standard GO threshold (70%). Strategic remediation is advised specifically under pricing structures and team profiles to raise likelihoods of compliance acceptance.
-                </div>
-              )}
-
-              <div className="space-y-2 pt-2">
-                <span className="font-bold tracking-tight text-slate-300 block">Recommendations:</span>
-                <ul className="list-disc list-inside space-y-1 text-slate-400 pl-1 leading-relaxed">
-                  {analysis.remedialActions?.map((action, key) => (
-                    <li key={key}>{action}</li>
+          <div className="rounded-xl border border-purple-950/20 bg-[#0a0a0f] p-5">
+            <h3 className="text-sm font-bold text-white">Strategic Remediation Matrix</h3>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4 text-sm">
+              <div>
+                <p className="font-semibold text-purple-300 mb-2">Compliance blockers</p>
+                <ul className="list-disc list-inside space-y-1 text-slate-400">
+                  {(blockers.length ? blockers : ["No compliance blockers are currently flagged."]).slice(0, 5).map((item, index) => (
+                    <li key={`${itemText(item)}-${index}`}>{itemText(item)}</li>
                   ))}
                 </ul>
               </div>
-
-              <div className="space-y-2 pt-2">
-                <span className="font-bold tracking-tight text-slate-300 block">Missing evidence / blockers:</span>
-                <ul className="list-disc list-inside space-y-1 text-slate-400 pl-1 leading-relaxed">
-                  {(analysis.no_matches || 0) > 0 && (
-                    <li>{analysis.no_matches} requirement(s) currently have no evidence match.</li>
-                  )}
-                  {(analysis.mandatoryFailed || 0) > 0 && (
-                    <li>{analysis.mandatoryFailed} mandatory requirement(s) failed compliance.</li>
-                  )}
-                  {complianceBlockers.slice(0, 4).map((requirement) => (
-                    <li key={requirement.id || requirement.title}>{requirement.title || requirement.description || "Compliance blocker requires evidence."}</li>
+              <div>
+                <p className="font-semibold text-purple-300 mb-2">Missing evidence</p>
+                <ul className="list-disc list-inside space-y-1 text-slate-400">
+                  {(missingEvidence.length ? missingEvidence : ["No missing evidence warnings are currently flagged."]).slice(0, 5).map((item, index) => (
+                    <li key={`${itemText(item)}-${index}`}>{itemText(item)}</li>
                   ))}
-                  {(analysis.no_matches || 0) === 0 && (analysis.mandatoryFailed || 0) === 0 && complianceBlockers.length === 0 && (
-                    <li>No missing evidence blockers are currently flagged by the scoring model.</li>
-                  )}
                 </ul>
               </div>
-
-              {runtimeDebug?.scoreSummary && (
-                <div className="rounded-lg border border-purple-950/20 bg-[#1a1a2e]/35 p-3">
-                  <div className="text-[10px] font-mono uppercase tracking-wider text-purple-300 mb-2">Live Score Debug</div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
-                    <div className="rounded-md bg-[#0a0a0f]/70 border border-purple-950/10 p-2">
-                      <div className="text-slate-500 uppercase font-mono">Total</div>
-                      <div className="text-slate-200 mt-1">{runtimeDebug.scoreSummary.totalScore}%</div>
-                    </div>
-                    <div className="rounded-md bg-[#0a0a0f]/70 border border-purple-950/10 p-2">
-                      <div className="text-slate-500 uppercase font-mono">Decision</div>
-                      <div className="text-slate-200 mt-1">{runtimeDebug.scoreSummary.decision}</div>
-                    </div>
-                    <div className="rounded-md bg-[#0a0a0f]/70 border border-purple-950/10 p-2">
-                      <div className="text-slate-500 uppercase font-mono">Strong/Partial/No</div>
-                      <div className="text-slate-200 mt-1">
-                        {runtimeDebug.scoreSummary.strongMatches}/{runtimeDebug.scoreSummary.partialMatches}/{runtimeDebug.scoreSummary.noMatches}
-                      </div>
-                    </div>
-                    <div className="rounded-md bg-[#0a0a0f]/70 border border-purple-950/10 p-2">
-                      <div className="text-slate-500 uppercase font-mono">Reason</div>
-                      <div className="text-slate-200 mt-1">{String(runtimeDebug.scoreSummary.decisionReasoning || "").slice(0, 100)}</div>
-                    </div>
-                  </div>
-                </div>
-              )}
+              <div>
+                <p className="font-semibold text-purple-300 mb-2">Required bidding actions</p>
+                <ol className="list-decimal list-inside space-y-1 text-slate-400">
+                  {(recommendedActions.length ? recommendedActions : defaultActions).slice(0, 5).map((item, index) => (
+                    <li key={`${itemText(item)}-${index}`}>{itemText(item)}</li>
+                  ))}
+                </ol>
+              </div>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }
