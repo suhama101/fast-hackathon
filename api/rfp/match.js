@@ -1,5 +1,5 @@
 import { CAPABILITY_LIBRARY } from "../../bid-engine/lib/sampleData.js";
-import { buildCapabilityIndex, retrieveCapabilityEvidence } from "../../bid-engine/lib/ragEngine.js";
+import { buildCapabilityIndex, retrieveCapabilityEvidence, syncCapabilityCorpus } from "../../bid-engine/lib/ragEngine.js";
 import { inferRequirementMetadata } from "../../bid-engine/lib/intelligence.js";
 import { requireAuthenticatedUser, requireWorkspaceOwner } from "../_lib/requestAuth.js";
 import { getSupabaseAdminOrNull } from "../_lib/supabase.js";
@@ -114,8 +114,31 @@ export default async function handler(req, res) {
     };
 
     const capabilityIndex = buildCapabilityIndex(capabilities);
+    let ragSeedStats = null;
+
+    try {
+      ragSeedStats = await syncCapabilityCorpus(capabilityIndex);
+      if (capabilityIndex.length > 0 && Number(ragSeedStats.finalRows || ragSeedStats.existingRows || 0) === 0) {
+        throw new Error("RAG corpus is empty after automatic seeding.");
+      }
+    } catch (seedError) {
+      console.error("[RAG ERROR] Automatic corpus seeding failed before Compliance Check.", {
+        capability_count: capabilityIndex.length,
+        error: seedError.message,
+      });
+      return res.status(500).json({
+        success: false,
+        mode,
+        workspaceId,
+        error: `RAG corpus seeding failed: ${seedError.message}`,
+        rag_error: seedError.message,
+        rag_warning: "Compliance Check stopped because vector corpus seeding failed.",
+        capability_count: capabilityIndex.length,
+      });
+    }
 
     const matches = [];
+    const ragWarnings = [];
     for (const [index, requirement] of requirements.entries()) {
       const normalized = normalizeRequirement(requirement, index);
       const requirementMeta = inferRequirementMetadata(
@@ -128,6 +151,16 @@ export default async function handler(req, res) {
         capabilityIndex,
         { topK: 3, entities: entityContext }
       );
+
+      if (evidence.rag_warning) {
+        ragWarnings.push({
+          requirement_id: normalized.id,
+          requirement_text: normalized.requirement_text,
+          warning: evidence.rag_warning,
+          details: evidence.rag_details || {},
+        });
+      }
+
       matches.push({
         requirement_id: normalized.id,
         requirement_text: normalized.requirement_text,
@@ -140,6 +173,16 @@ export default async function handler(req, res) {
         evidence_items: evidence.evidence_items || [],
         source_references: evidence.source_references || [],
         matched_terms: evidence.matched_terms || [],
+        rag_warning: evidence.rag_warning || null,
+        rag_details: evidence.rag_details || null,
+        traceability: evidence.traceability || null,
+      });
+    }
+
+    if (ragWarnings.length > 0) {
+      console.warn("[RAG WARNING] Compliance Check completed with RAG warnings.", {
+        warning_count: ragWarnings.length,
+        first_warning: ragWarnings[0],
       });
     }
 
@@ -187,6 +230,7 @@ export default async function handler(req, res) {
         match_reasoning: match?.reasoning,
         evidence_items: match?.evidence_items || [],
         match_status: match?.match_status || "No Match",
+        rag_warning: match?.rag_warning || null,
       };
     });
 
@@ -197,7 +241,12 @@ export default async function handler(req, res) {
       matches,
       requirements: requirementsWithMatches,
       capability_count: capabilities.length,
+      rag_seed: ragSeedStats,
       extracted_entities: entityContext,
+      rag_warning: ragWarnings.length
+        ? "RAG corpus is empty or unavailable for at least one requirement. See rag_warnings."
+        : null,
+      rag_warnings: ragWarnings,
     });
   } catch (err) {
     console.error("Failure in matching route:", err);

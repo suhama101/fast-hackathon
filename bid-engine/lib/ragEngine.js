@@ -6,7 +6,6 @@ import { SupabaseVectorStore } from "@langchain/community/vectorstores/supabase"
 import { analyzeWithGroq } from "./groqClient.js";
 import { getSupabaseAdminOrNull } from "./supabaseClient.js";
 import { inferRequirementMetadata } from "./intelligence.js";
-import { matchRequirementToCapabilities as heuristicMatchRequirementToCapabilities } from "./datasetAnalysis.js";
 
 const VECTOR_TABLE = "evidence_documents";
 const VECTOR_QUERY_NAME = "match_evidence_documents";
@@ -14,6 +13,7 @@ const EMBEDDING_MODEL = "text-embedding-3-small";
 const DEFAULT_TOP_K = 6;
 const CHUNK_SIZE = 900;
 const CHUNK_OVERLAP = 120;
+const INSERT_BATCH_SIZE = 100;
 
 const FALLBACK_STOPWORDS = new Set([
   "the", "and", "for", "with", "must", "shall", "will", "this", "that", "from", "have", "has",
@@ -22,6 +22,14 @@ const FALLBACK_STOPWORDS = new Set([
 ]);
 
 const unique = (values) => [...new Set(values)];
+
+const ragLog = (message, details = {}) => {
+  console.info(`[RAG] ${message}`, details);
+};
+
+const ragWarn = (message, details = {}) => {
+  console.warn(`[RAG WARNING] ${message}`, details);
+};
 
 export const tokenize = (text) =>
   String(text || "")
@@ -86,6 +94,19 @@ const getEmbeddings = () => {
     apiKey: process.env.OPENAI_API_KEY,
     model: EMBEDDING_MODEL,
   });
+};
+
+const getCorpusCount = async (supabase) => {
+  const { count, error } = await supabase
+    .from(VECTOR_TABLE)
+    .select("id", { count: "exact", head: true })
+    .eq("source_type", "capability_library");
+
+  if (error) {
+    throw new Error(`Failed to inspect RAG corpus: ${error.message}`);
+  }
+
+  return Number(count || 0);
 };
 
 const inferCapabilityEvidenceTypes = (capability = {}) => {
@@ -199,23 +220,39 @@ const capabilityToDocuments = async (capability = {}) => {
 
 export const syncCapabilityCorpus = async (capabilities = [], { force = false } = {}) => {
   const supabase = getSupabaseClient();
-  const { count, error: countError } = await supabase
-    .from(VECTOR_TABLE)
-    .select("id", { count: "exact", head: true })
-    .eq("source_type", "capability_library");
+  const capabilityCount = capabilities.length;
+  const existingCount = await getCorpusCount(supabase);
 
-  if (countError && !force) {
-    return { synced: false, reason: countError.message };
+  ragLog("corpus_sync_start", {
+    capability_count: capabilityCount,
+    existing_rows: existingCount,
+    force,
+  });
+
+  if (!force && existingCount > 0) {
+    ragLog("corpus_sync_skipped", {
+      reason: "vector_corpus_present",
+      existing_rows: existingCount,
+    });
+    return {
+      synced: false,
+      reason: "vector_corpus_present",
+      capabilityCount,
+      existingRows: existingCount,
+      documentsChunked: 0,
+      embeddingsGenerated: 0,
+      rowsInserted: 0,
+    };
   }
 
-  if (!force && Number(count || 0) > 0) {
-    return { synced: false, reason: "vector_corpus_present" };
-  }
-
-  await supabase
+  const { error: deleteError } = await supabase
     .from(VECTOR_TABLE)
     .delete()
     .eq("source_type", "capability_library");
+
+  if (deleteError) {
+    throw new Error(`Failed to clear old RAG corpus rows: ${deleteError.message}`);
+  }
 
   const documents = [];
   for (const capability of capabilities) {
@@ -223,29 +260,121 @@ export const syncCapabilityCorpus = async (capabilities = [], { force = false } 
     documents.push(...chunks);
   }
 
-  if (!documents.length) {
-    return { synced: false, reason: "no_documents" };
-  }
-
-  const store = new SupabaseVectorStore(getEmbeddings(), {
-    client: supabase,
-    tableName: VECTOR_TABLE,
-    queryName: VECTOR_QUERY_NAME,
+  ragLog("documents_chunked", {
+    capability_count: capabilityCount,
+    documents_chunked: documents.length,
   });
 
-  await store.addDocuments(documents);
-  return { synced: true, documentCount: documents.length };
+  if (!documents.length) {
+    ragWarn("corpus_sync_empty_documents", {
+      capability_count: capabilityCount,
+    });
+    return {
+      synced: false,
+      reason: "no_documents",
+      capabilityCount,
+      existingRows: existingCount,
+      documentsChunked: 0,
+      embeddingsGenerated: 0,
+      rowsInserted: 0,
+    };
+  }
+
+  const embeddingsClient = getEmbeddings();
+  let embeddings = [];
+  try {
+    embeddings = await embeddingsClient.embedDocuments(documents.map((doc) => doc.pageContent));
+  } catch (error) {
+    ragWarn("embedding_generation_failed", {
+      capability_count: capabilityCount,
+      documents_chunked: documents.length,
+      error: error.message,
+    });
+    throw new Error(`Failed to generate OpenAI embeddings for RAG corpus: ${error.message}`);
+  }
+
+  ragLog("embeddings_generated", {
+    model: EMBEDDING_MODEL,
+    documents_chunked: documents.length,
+    embeddings_generated: embeddings.length,
+  });
+
+  if (embeddings.length !== documents.length) {
+    throw new Error(`Embedding count mismatch: generated ${embeddings.length} for ${documents.length} documents.`);
+  }
+
+  const rows = documents.map((doc, index) => ({
+    source_type: doc.metadata?.source_type || "capability_library",
+    source_id: doc.metadata?.source_id || `CAPABILITY-${index + 1}`,
+    workspace_id: doc.metadata?.workspace_id || null,
+    chunk_index: Number(doc.metadata?.chunk_index || 0),
+    content: doc.pageContent,
+    metadata: doc.metadata || {},
+    embedding: embeddings[index],
+  }));
+
+  let rowsInserted = 0;
+  for (let start = 0; start < rows.length; start += INSERT_BATCH_SIZE) {
+    const batch = rows.slice(start, start + INSERT_BATCH_SIZE);
+    const { data, error } = await supabase
+      .from(VECTOR_TABLE)
+      .insert(batch)
+      .select("id");
+
+    if (error) {
+      ragWarn("corpus_insert_failed", {
+        batch_start: start,
+        batch_size: batch.length,
+        error: error.message,
+      });
+      throw new Error(`Failed to insert RAG corpus rows into ${VECTOR_TABLE}: ${error.message}`);
+    }
+
+    rowsInserted += data?.length || batch.length;
+    ragLog("corpus_insert_batch", {
+      batch_start: start,
+      batch_size: batch.length,
+      rows_inserted_total: rowsInserted,
+    });
+  }
+
+  const finalCount = await getCorpusCount(supabase);
+  ragLog("corpus_sync_complete", {
+    capability_count: capabilityCount,
+    documents_chunked: documents.length,
+    embeddings_generated: embeddings.length,
+    rows_inserted: rowsInserted,
+    final_rows: finalCount,
+  });
+
+  return {
+    synced: true,
+    documentCount: documents.length,
+    capabilityCount,
+    existingRows: existingCount,
+    documentsChunked: documents.length,
+    embeddingsGenerated: embeddings.length,
+    rowsInserted,
+    finalRows: finalCount,
+  };
 };
 
 const createVectorStore = async (capabilities = [], options = {}) => {
   const supabase = getSupabaseClient();
-  await syncCapabilityCorpus(capabilities, { force: Boolean(options.forceSync) });
+  const syncStats = await syncCapabilityCorpus(capabilities, { force: Boolean(options.forceSync) });
+  const finalCount = syncStats.finalRows ?? await getCorpusCount(supabase);
 
-  return new SupabaseVectorStore(getEmbeddings(), {
+  if (capabilities.length > 0 && finalCount === 0) {
+    throw new Error("RAG corpus is empty after synchronization. Compliance Check cannot use vector retrieval.");
+  }
+
+  const vectorStore = new SupabaseVectorStore(getEmbeddings(), {
     client: supabase,
     tableName: VECTOR_TABLE,
     queryName: VECTOR_QUERY_NAME,
   });
+
+  return { vectorStore, syncStats: { ...syncStats, finalRows: finalCount } };
 };
 
 const rerankEvidence = async ({ requirementText, requirementMeta, candidates = [] }) => {
@@ -302,7 +431,33 @@ Rules:
   }).sort((left, right) => Number(right.rerank_score || 0) - Number(left.rerank_score || 0));
 };
 
-const buildEvidenceResponse = (requirementMeta, best, ranked, queryText) => {
+const buildRagUnavailableResponse = (requirementMeta, queryText, warning, details = {}) => ({
+  compliance_status: "fail",
+  match_status: "No Match",
+  confidence_score: 0,
+  match_score: 0,
+  evidence_type: requirementMeta.expected_evidence_type,
+  matched_evidence: "RAG unavailable: no verified vector evidence was retrieved.",
+  evidence: "RAG unavailable: no verified vector evidence was retrieved.",
+  reason: warning,
+  source: "",
+  evidence_items: [],
+  source_references: [],
+  matched_terms: [],
+  requirement_category: requirementMeta.category,
+  expected_evidence_type: requirementMeta.expected_evidence_type,
+  rag_warning: warning,
+  rag_details: details,
+  traceability: {
+    query: queryText,
+    approved_evidence: null,
+    rejected_candidates: [],
+    rag_warning: warning,
+    rag_details: details,
+  },
+});
+
+const buildEvidenceResponse = (requirementMeta, best, ranked, queryText, syncStats = null) => {
   if (!best) {
     return {
       compliance_status: "fail",
@@ -319,10 +474,13 @@ const buildEvidenceResponse = (requirementMeta, best, ranked, queryText) => {
       matched_terms: [],
       requirement_category: requirementMeta.category,
       expected_evidence_type: requirementMeta.expected_evidence_type,
+      rag_warning: ranked.length ? null : "RAG vector search returned no candidates.",
+      rag_details: syncStats,
       traceability: {
         query: queryText,
         approved_evidence: null,
         rejected_candidates: ranked,
+        rag_details: syncStats,
       },
     };
   }
@@ -360,10 +518,13 @@ const buildEvidenceResponse = (requirementMeta, best, ranked, queryText) => {
     matched_terms: unique(tokenize(evidenceText)).slice(0, 12),
     requirement_category: requirementMeta.category,
     expected_evidence_type: requirementMeta.expected_evidence_type,
+    rag_warning: null,
+    rag_details: syncStats,
     traceability: {
       query: queryText,
       approved_evidence: best,
       rejected_candidates: ranked.filter((item) => !item.rerank_support),
+      rag_details: syncStats,
     },
   };
 };
@@ -401,18 +562,17 @@ export const retrieveCapabilityEvidence = async (requirement, capabilities = [],
     ...(options.entities?.mandatory_clauses || []),
   ].join(" ").trim();
 
-  const fallback = () => heuristicMatchRequirementToCapabilities(
-    { requirement_text: requirementText, requirement_category: requirementMeta.category },
-    capabilities,
-    options
-  );
-
   try {
     if (!process.env.OPENAI_API_KEY) {
-      return fallback();
+      const warning = "RAG disabled: OPENAI_API_KEY is missing, so embeddings cannot be generated.";
+      ragWarn("retrieval_blocked", { reason: warning });
+      return buildRagUnavailableResponse(requirementMeta, queryText, warning, {
+        capability_count: capabilities.length,
+        corpus_ready: false,
+      });
     }
 
-    const vectorStore = await createVectorStore(capabilities, options);
+    const { vectorStore, syncStats } = await createVectorStore(capabilities, options);
     const retriever = vectorStore.asRetriever(DEFAULT_TOP_K);
     const retrievalChain = RunnableSequence.from([
       async (input) => ({ ...input, query: input.query || queryText }),
@@ -442,13 +602,20 @@ export const retrieveCapabilityEvidence = async (requirement, capabilities = [],
     const best = approved[0] || ranked[0] || null;
 
     if (!best || (!best.rerank_support && Number(best.rerank_score || 0) < 0.15)) {
-      return buildEvidenceResponse(requirementMeta, null, ranked, queryText);
+      return buildEvidenceResponse(requirementMeta, null, ranked, queryText, syncStats);
     }
 
-    return buildEvidenceResponse(requirementMeta, best, ranked, queryText);
+    return buildEvidenceResponse(requirementMeta, best, ranked, queryText, syncStats);
   } catch (error) {
-    console.warn("Real RAG retrieval failed, falling back to heuristic matching:", error.message);
-    return fallback();
+    const warning = `RAG retrieval failed: ${error.message}`;
+    ragWarn("retrieval_failed", {
+      capability_count: capabilities.length,
+      error: error.message,
+    });
+    return buildRagUnavailableResponse(requirementMeta, queryText, warning, {
+      capability_count: capabilities.length,
+      corpus_ready: false,
+    });
   }
 };
 
